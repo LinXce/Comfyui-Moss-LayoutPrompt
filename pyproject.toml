@@ -1,0 +1,16 @@
+[project]
+name = "moss-layoutprompt"
+version = "0.1.0"
+description = "Canvas Layout prompt editor for MOSS-Image in ComfyUI"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/OpenMOSS/MOSS-Image"
+Documentation = "https://github.com/OpenMOSS/MOSS-Image/blob/main/comfyui/moss-layoutPrompt-LP/README.md"
+
+[tool.comfy]
+PublisherId = "mosi"
+DisplayName = "MOSS Layout Prompt"
+Banner = "https://raw.githubusercontent.com/OpenMOSS/MOSS-Image/main/assets/teaser.webp"
