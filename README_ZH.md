@@ -68,6 +68,8 @@ MOSS-Image 旧版 scene schema（`scene_type` / `gen_brief` / `elements`），�
 - `meta` 标签是胶囊：输入后回车或逗号添加；点击胶囊文字即可就地编辑，点击编辑框以外的任意位置
   （或回车）完成编辑，`Esc` 取消，`×` 移除。
 - `添加框` 新建框，`✕` 删除该框，`清空` 清空画布。
+- `全部清空`（红色，仅 Advance 节点）清空**所有内容**：全部框、总提示词、`meta` 标签和
+  `source` 外部输入；画布尺寸保留。
 - `从文件导入` 从磁盘载入草稿 JSON 文件并放进画布。文件里的 JSON 可以夹杂无关文字或
   被代码块包裹，会自动提取出对象；若导入的是已编译的 `abs_centralized`/`yxyx` 提示词或
   旧版 `scene_type`/`elements` 提示词，会按节点的 `width`/`height` 反解成草稿。转换后如果

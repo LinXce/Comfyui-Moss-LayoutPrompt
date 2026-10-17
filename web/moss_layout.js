@@ -1,6 +1,7 @@
 import { app } from "../../scripts/app.js";
 
-const NODE_CLASSES = ["MOSSImageLayoutPrompt", "MOSSImageLayoutPromptAdvance"];
+const ADVANCE_CLASS = "MOSSImageLayoutPromptAdvance";
+const NODE_CLASSES = ["MOSSImageLayoutPrompt", ADVANCE_CLASS];
 const LAYOUT_WIDGET = "layout";
 const SOURCE_WIDGET = "source";
 const SIZE_WIDGETS = ["width", "height"];
@@ -84,6 +85,8 @@ const CSS = `
 .mlp-btn:hover{background:#2f3642;border-color:#4a5361}
 .mlp-btn-primary{background:#1f5fae;border-color:#2a72cc;color:#fff}
 .mlp-btn-primary:hover{background:#2770c6;border-color:#3a84dd}
+.mlp-btn-danger{background:#7a2626;border-color:#94302f;color:#ffdede}
+.mlp-btn-danger:hover{background:#8f2c2c;border-color:#b23a38;color:#fff}
 .mlp-btn-icon{border:0;background:transparent;color:#8b93a1;padding:2px 6px;font-size:14px}
 .mlp-btn-icon:hover{color:#ff8a8a;background:transparent;border:0}
 .mlp-color{display:inline-flex;align-items:center;gap:2px}
@@ -497,6 +500,7 @@ function createEditor(node) {
     return null;
   }
   ensureStyle();
+  const isAdvance = node.comfyClass === ADVANCE_CLASS || node.type === ADVANCE_CLASS;
 
   const sizeWidgets = {};
   for (const name of SIZE_WIDGETS) {
@@ -547,6 +551,26 @@ function createEditor(node) {
       element.addEventListener("input", queueSource);
     }
     applySource();
+  }
+
+  function clearSource() {
+    const widget = node.widgets?.find((entry) => entry.name === SOURCE_WIDGET);
+    if (!widget) return;
+    widget.value = "";
+    if (widget.element instanceof HTMLTextAreaElement) widget.element.value = "";
+    lastSourceText = "";
+  }
+
+  function clearAll() {
+    if (!window.confirm("清空所有内容？总提示词、标签、所有框和外部输入都会清空。")) return;
+    state.items = [];
+    state.summary = { caption: "", meta: [], canvas: "single", palette: null };
+    selection = -1;
+    hover = -1;
+    clearSource();
+    render();
+    sync();
+    draw();
   }
 
   const state = {
@@ -951,6 +975,13 @@ function createEditor(node) {
         text: "从文件导入",
         onclick: () => fileInput.click(),
       }),
+      isAdvance ? h("button", {
+        type: "button",
+        class: "mlp-btn mlp-btn-danger",
+        title: "清空所有内容：总提示词、标签、所有框和外部输入",
+        text: "全部清空",
+        onclick: () => clearAll(),
+      }) : null,
       h("span", { class: "mlp-count", text: `${state.items.length} 个框` }),
     ]);
   }

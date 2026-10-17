@@ -81,6 +81,8 @@ canvas size.
   to edit it in place, and click anywhere outside the chip (or press Enter) to
   finish. `Esc` cancels the edit; `×` removes the tag.
 - `添加框` adds a box, `✕` deletes one, `清空` clears the canvas.
+- `全部清空` (red, Advance node only) clears **everything**: every box, the summary
+  prompt, the `meta` tags and the `source` input. The canvas size is kept.
 - `从文件导入` loads a draft JSON file and puts it on the canvas. The file may
   wrap the JSON in unrelated prose or a code fence; the object is extracted, and
   a compiled `abs_centralized`/`yxyx` prompt or a legacy `scene_type`/`elements`
