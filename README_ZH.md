@@ -5,6 +5,9 @@
 MOSS-Image 的 JSON Layout 提示词画布编辑器。在画布上为每个元素画一个框，
 右侧每个框一行编辑，节点输出编译后的提示词以及工作流应使用的画布尺寸。
 
+本插件提供两个节点：稳定版 **MOSS Layout Prompt**，以及在其之上增加外部草稿输入的
+**MOSS Layout Prompt (Advance)**（**实验阶段**）。
+
 ![MOSS Layout Prompt 节点：左侧是画有两个框的画布，右侧是 meta 标签、每个框一行的编辑卡片，以及底部只读的编译结果预览。](assets/editor.png)
 
 ## 安装
@@ -27,15 +30,30 @@ MOSS-Image 的 JSON Layout 提示词画布编辑器。在画布上为每个元�
 
 ## 节点
 
-**MOSS Layout Prompt** — 节点 ID `MOSSImageLayoutPrompt`，分类 `moss-layoutPrompt-LP`。
-节点 ID 沿用旧版本，已保存的工作流仍可正常加载。
+两个节点都在 `moss-layoutPrompt-LP` 分类下，共用同一个画布编辑器，输出也完全相同。
+
+> **实验阶段：**`MOSS Layout Prompt (Advance)` 仍在开发中，输入与行为可能随版本变化；
+> 需要长期稳定的工作流请继续使用 `MOSS Layout Prompt`。两个节点总是一起发布，同一份
+> 草稿产出的提示词完全一致。
+
+### MOSS Layout Prompt (Advance) — 实验阶段
+
+节点 ID `MOSSImageLayoutPromptAdvance`。原节点再加上外部草稿输入：`source` 接受草稿
+JSON、已编译提示词或旧版 scene 提示词，并载入画布。
 
 | 输入 | |
 | --- | --- |
 | `width`、`height` | 画布与图片尺寸，须为 16 的正整数倍。 |
+| `source` | **实验阶段。**外部草稿文本。粘贴草稿 JSON（可夹杂无关文字，也可以是已编译的 `abs_centralized`/`yxyx`）后会载入画布。没有编辑器时直接编译，但仅当画布没有框。 |
 | `layout` | 草稿 JSON。编辑器会隐藏它；画布不可用时可直接手写。 |
 
-| 输出 | |
+### MOSS Layout Prompt — 稳定版
+
+节点 ID `MOSSImageLayoutPrompt`。原节点保留，已保存的工作流仍可正常加载。画布编辑器、
+输出、`width`/`height`/`layout` 输入都与上面相同，只是没有 `source`。它的 `layout` 也接受
+MOSS-Image 旧版 scene schema（`scene_type` / `gen_brief` / `elements`），会按节点的画布尺寸转换。
+
+| 输出（两个节点相同） | |
 | --- | --- |
 | `prompt` | 供 `CLIPTextEncode` 使用的编译后提示词。 |
 | `width`、`height` | 供潜空间节点使用的画布尺寸。 |
@@ -50,6 +68,10 @@ MOSS-Image 的 JSON Layout 提示词画布编辑器。在画布上为每个元�
 - `meta` 标签是胶囊：输入后回车或逗号添加；点击胶囊文字即可就地编辑，点击编辑框以外的任意位置
   （或回车）完成编辑，`Esc` 取消，`×` 移除。
 - `添加框` 新建框，`✕` 删除该框，`清空` 清空画布。
+- `从文件导入` 从磁盘载入草稿 JSON 文件并放进画布。文件里的 JSON 可以夹杂无关文字或
+  被代码块包裹，会自动提取出对象；若导入的是已编译的 `abs_centralized`/`yxyx` 提示词或
+  旧版 `scene_type`/`elements` 提示词，会按节点的 `width`/`height` 反解成草稿。转换后如果
+  框超出画布，会围绕画布中心等比缩放到画布内。
 - 面板底部固定一个只读的编译结果预览，实时显示节点即将输出的提示词。
 
 ## 草稿与编译后的提示词
@@ -74,6 +96,10 @@ MOSS-Image 的 JSON Layout 提示词画布编辑器。在画布上为每个元�
 
 校验只针对草稿的结构：画布尺寸、框的几何、`label` 取值和字段名。caption 属于内容，
 总提示词或某个框的 caption 留空是允许的，节点照常运行。
+
+草稿也可以通过 `source` 输入传入：粘贴或导入后会载入画布，之后以画布为准继续编辑；
+如果是已编译的 `abs_centralized`/`yxyx` 提示词，会先用节点的 `width`/`height` 反解回草稿。
+没有编辑器时 `source` 会被直接编译，但仅当画布上没有框。
 
 字段规范、坐标系与构图要求见 MOSS-Image 仓库中的
 [references/layout.md](https://github.com/OpenMOSS/MOSS-Image/blob/main/skills/moss-image-prompt-enhancer/references/layout.md)

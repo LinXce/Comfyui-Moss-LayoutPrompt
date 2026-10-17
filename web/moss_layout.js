@@ -1,7 +1,8 @@
 import { app } from "../../scripts/app.js";
 
-const NODE_CLASS = "MOSSImageLayoutPrompt";
+const NODE_CLASSES = ["MOSSImageLayoutPrompt", "MOSSImageLayoutPromptAdvance"];
 const LAYOUT_WIDGET = "layout";
+const SOURCE_WIDGET = "source";
 const SIZE_WIDGETS = ["width", "height"];
 const PASS_THROUGH_FIELDS = ["tags", "palette"];
 const LABELS = ["object", "character", "text"];
@@ -15,6 +16,9 @@ const MIN_SIZE = 16;
 const EDITOR_MIN_HEIGHT = 420;
 const MIN_NODE_WIDTH = 980;
 const MIN_NODE_HEIGHT = 680;
+const SOURCE_WIDGET_HEIGHT = 26;
+const SOURCE_DEBOUNCE = 400;
+const SOURCE_POLL = 600;
 const SIDE_WIDTH = 360;
 const DEFAULT_SIZE = 1024;
 const STYLE_ID = "moss-layout-style";
@@ -303,6 +307,184 @@ function stringArray(value) {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : null;
 }
 
+function* jsonObjects(text) {
+  for (let start = 0; start < text.length; start += 1) {
+    if (text[start] !== "{") continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < text.length; index += 1) {
+      const char = text[index];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (char === "\\") escaped = true;
+        else if (char === '"') inString = false;
+        continue;
+      }
+      if (char === '"') inString = true;
+      else if (char === "{") depth += 1;
+      else if (char === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          yield text.slice(start, index + 1);
+          break;
+        }
+      }
+    }
+  }
+}
+
+function parseDraftText(raw) {
+  const text = typeof raw === "string" ? raw.trim() : "";
+  if (!text) return null;
+  try {
+    const value = JSON.parse(text);
+    if (value && typeof value === "object" && !Array.isArray(value)) return value;
+  } catch (error) {
+    // not plain JSON, fall through and scan for a wrapped object
+  }
+  let fallback = null;
+  for (const candidate of jsonObjects(text)) {
+    let value;
+    try {
+      value = JSON.parse(candidate);
+    } catch (error) {
+      continue;
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    if ("summary" in value || "items" in value || "elements" in value) return value;
+    if (!fallback) fallback = value;
+  }
+  return fallback;
+}
+
+function isSceneSchema(value) {
+  return Array.isArray(value?.elements);
+}
+
+const SCENE_LABELS = {
+  panel: "object", obj: "object", object: "object", shape: "object",
+  character: "character", person: "character", text: "text",
+};
+const SCENE_TEXT_FIELDS = ["identity", "shape", "note"];
+
+function sceneText(value, key) {
+  const text = value?.[key];
+  return typeof text === "string" ? text.trim() : "";
+}
+
+function sceneSize(value, name, fallback) {
+  const size = value?.[name];
+  return Number.isInteger(size) && size > 0 ? size : fallback;
+}
+
+function sceneMustNot(value) {
+  const entries = Array.isArray(value) ? value : [value];
+  const parts = [];
+  for (const entry of entries) {
+    if (typeof entry !== "string" || !entry.trim()) continue;
+    let text = entry.trim();
+    if (text.slice(0, 4).toLowerCase() === "not ") text = text.slice(4).trim();
+    if (text) parts.push(text);
+  }
+  return parts.join("; ");
+}
+
+function draftFromSceneSchema(raw, width, height) {
+  const canvasWidth = sceneSize(raw, "width", width);
+  const canvasHeight = sceneSize(raw, "height", height);
+  const centered = raw.bbox_coord_space !== "abs";
+  const items = raw.elements.map((element) => {
+    const key = String(element?.type ?? "").trim().toLowerCase();
+    const label = SCENE_LABELS[key] ?? "object";
+    const caption = SCENE_TEXT_FIELDS
+      .map((field) => sceneText(element, field))
+      .filter(Boolean)
+      .join(" ");
+    const box = Array.isArray(element?.bbox) ? element.bbox.map(Number) : [];
+    const item = { label, caption };
+    if (label === "text") {
+      const text = sceneText(element, "text") || sceneText(element, "identity");
+      if (text) item.text = text;
+      else item.label = "object";
+    }
+    item.bbox = centered && box.length === 4
+      ? [box[1] + canvasWidth / 2, box[0] + canvasHeight / 2,
+         box[3] + canvasWidth / 2, box[2] + canvasHeight / 2]
+      : box;
+    return item;
+  });
+  let caption = [sceneText(raw, "scene_type"), sceneText(raw, "gen_brief")].filter(Boolean).join(". ");
+  const mustNot = sceneMustNot(raw.must_not);
+  if (mustNot) caption = `${caption} Avoid: ${mustNot}`.trim();
+  const summary = { caption };
+  if (Array.isArray(raw.palette) && raw.palette.every((entry) => typeof entry === "string")) {
+    summary.palette = raw.palette;
+  }
+  return {
+    width: canvasWidth,
+    height: canvasHeight,
+    bbox_coord_space: "abs",
+    bbox_format: "xyxy",
+    summary,
+    items,
+  };
+}
+
+function isCompiledDraft(value) {
+  return value?.bbox_coord_space === "abs_centralized" || value?.bbox_format === "yxyx";
+}
+
+function draftFromCompiled(raw, width, height) {
+  const halfWidth = width / 2;
+  const halfHeight = height / 2;
+  const items = (Array.isArray(raw.items) ? raw.items : []).map((item) => {
+    const box = Array.isArray(item?.bbox) ? item.bbox : null;
+    if (!box || box.length !== 4) return item;
+    const [y1, x1, y2, x2] = box;
+    return { ...item, bbox: [x1 + halfWidth, y1 + halfHeight, x2 + halfWidth, y2 + halfHeight] };
+  });
+  return {
+    width,
+    height,
+    bbox_coord_space: "abs",
+    bbox_format: "xyxy",
+    summary: raw.summary ?? { caption: "" },
+    items,
+  };
+}
+
+function fitDraftToCanvas(draft) {
+  const width = Number(draft?.width);
+  const height = Number(draft?.height);
+  const items = Array.isArray(draft?.items) ? draft.items : [];
+  if (!(width > 0) || !(height > 0) || !items.length) return null;
+  let halfWidth = 0;
+  let halfHeight = 0;
+  for (const item of items) {
+    const box = Array.isArray(item?.bbox) ? item.bbox.map(Number) : null;
+    if (!box || box.length !== 4 || box.some((value) => !Number.isFinite(value))) continue;
+    halfWidth = Math.max(halfWidth, Math.abs(box[0] - width / 2), Math.abs(box[2] - width / 2));
+    halfHeight = Math.max(halfHeight, Math.abs(box[1] - height / 2), Math.abs(box[3] - height / 2));
+  }
+  if (!halfWidth || !halfHeight) return null;
+  if (halfWidth <= width / 2 && halfHeight <= height / 2) return null;
+  const scale = Math.min((width / 2) / halfWidth, (height / 2) / halfHeight);
+  const fitted = items.map((item) => {
+    const box = Array.isArray(item?.bbox) ? item.bbox.map(Number) : null;
+    if (!box || box.length !== 4 || box.some((value) => !Number.isFinite(value))) return item;
+    const [x1, y1, x2, y2] = box;
+    return {
+      ...item,
+      bbox: [
+        (x1 - width / 2) * scale + width / 2, (y1 - height / 2) * scale + height / 2,
+        (x2 - width / 2) * scale + width / 2, (y2 - height / 2) * scale + height / 2,
+      ],
+    };
+  });
+  return { ...draft, items: fitted };
+}
+
 function colorOf(item) {
   return item.color || LABEL_COLORS[item.label] || FALLBACK_COLOR;
 }
@@ -319,6 +501,52 @@ function createEditor(node) {
   const sizeWidgets = {};
   for (const name of SIZE_WIDGETS) {
     sizeWidgets[name] = node.widgets?.find((widget) => widget.name === name);
+  }
+  let sourceTimer = 0;
+  let lastSourceText = "";
+  let styledSource = null;
+
+  function queueSource() {
+    window.clearTimeout(sourceTimer);
+    sourceTimer = window.setTimeout(applySource, SOURCE_DEBOUNCE);
+  }
+
+  function applySource() {
+    const widget = node.widgets?.find((entry) => entry.name === SOURCE_WIDGET);
+    const text = typeof widget?.value === "string" ? widget.value.trim() : "";
+    if (!text || text === lastSourceText) return;
+    try {
+      if (loadDraftText(text, null)) lastSourceText = text;
+    } catch (error) {
+      console.error("[moss-layoutPrompt] failed to load the source draft", error);
+    }
+  }
+
+  function watchSource() {
+    const widget = node.widgets?.find((entry) => entry.name === SOURCE_WIDGET);
+    if (!widget) return;
+    if (widget.__mlpSource !== true) {
+      widget.__mlpSource = true;
+      widget.options = widget.options ?? {};
+      widget.options.getMinHeight = () => SOURCE_WIDGET_HEIGHT;
+      widget.options.getMaxHeight = () => SOURCE_WIDGET_HEIGHT;
+      const onSourceInput = widget.callback;
+      widget.callback = function (...args) {
+        const result = onSourceInput?.apply(this, args);
+        queueSource();
+        return result;
+      };
+    }
+    const element = widget.element;
+    if (element instanceof HTMLTextAreaElement && element !== styledSource) {
+      styledSource = element;
+      element.rows = 1;
+      element.style.height = `${SOURCE_WIDGET_HEIGHT}px`;
+      element.style.minHeight = `${SOURCE_WIDGET_HEIGHT}px`;
+      element.style.maxHeight = `${SOURCE_WIDGET_HEIGHT}px`;
+      element.addEventListener("input", queueSource);
+    }
+    applySource();
   }
 
   const state = {
@@ -353,6 +581,20 @@ function createEditor(node) {
   ]);
   const side = h("div", { class: "mlp-side" }, [list, preview]);
   const root = h("div", { class: "mlp-root" }, [stage, side]);
+  const fileInput = h("input", {
+    type: "file",
+    accept: ".json,.txt,application/json,text/plain",
+    style: { display: "none" },
+    onchange: () => {
+      const file = fileInput.files?.[0];
+      fileInput.value = "";
+      if (!file) return;
+      file.text()
+        .then((text) => loadDraftText(text, file.name))
+        .catch((error) => window.alert(`读取文件失败：${error?.message ?? error}`));
+    },
+  });
+  root.append(fileInput);
 
   node.addDOMWidget("layout_editor", "layout", root, {
     serialize: false,
@@ -475,16 +717,38 @@ function createEditor(node) {
   }
 
   function load() {
-    let draft = null;
     const raw = layoutWidget.value;
-    if (typeof raw === "string" && raw.trim()) {
-      try {
-        draft = JSON.parse(raw);
-      } catch (error) {
-        console.warn("[moss-layoutPrompt] layout widget is not valid JSON", error);
+    applyDraft(parseDraftText(raw));
+    if (!state.items.length && typeof raw === "string" && raw.trim() && !parseDraftText(raw)) {
+      console.warn("[moss-layoutPrompt] no draft JSON found in the layout widget");
+    }
+    if (state.items.length) return;
+    applySource();
+  }
+
+  function loadDraftText(raw, label) {
+    const parsed = parseDraftText(raw);
+    if (!parsed) {
+      if (label) window.alert(`${label}：没有找到草稿 JSON。`);
+      return false;
+    }
+    let draft = parsed;
+    if (isSceneSchema(parsed)) draft = draftFromSceneSchema(parsed, state.width, state.height);
+    else if (isCompiledDraft(parsed)) draft = draftFromCompiled(parsed, state.width, state.height);
+    if (draft !== parsed) {
+      const fitted = fitDraftToCanvas(draft);
+      if (fitted) {
+        draft = fitted;
+        const notice = `框超出 ${draft.width}×${draft.height} 画布，已等比缩放到画布内。`;
+        if (label) window.alert(`${label}：${notice}`);
+        else console.warn(`[moss-layoutPrompt] ${notice}`);
       }
     }
     applyDraft(draft);
+    render();
+    sync();
+    draw();
+    return true;
   }
 
   function writeBboxInputs(index) {
@@ -679,6 +943,13 @@ function createEditor(node) {
           sync();
           draw();
         },
+      }),
+      h("button", {
+        type: "button",
+        class: "mlp-btn",
+        title: "导入草稿 JSON 文件（可夹杂无关文字）",
+        text: "从文件导入",
+        onclick: () => fileInput.click(),
       }),
       h("span", { class: "mlp-count", text: `${state.items.length} 个框` }),
     ]);
@@ -995,6 +1266,14 @@ function createEditor(node) {
   load();
   render();
   sync();
+  watchSource();
+  const sourceWatch = window.setInterval(watchSource, SOURCE_POLL);
+  const onRemoved = node.onRemoved;
+  node.onRemoved = function (...args) {
+    window.clearInterval(sourceWatch);
+    window.clearTimeout(sourceTimer);
+    return onRemoved?.apply(this, args);
+  };
   const onResize = node.onResize;
   node.onResize = function (size) {
     const result = onResize?.apply(this, arguments);
@@ -1012,7 +1291,7 @@ function createEditor(node) {
 app.registerExtension({
   name: "MOSSLayout.LayoutPrompt",
   nodeCreated(node) {
-    if (node.comfyClass !== NODE_CLASS && node.type !== NODE_CLASS) return;
+    if (!NODE_CLASSES.includes(node.comfyClass) && !NODE_CLASSES.includes(node.type)) return;
     if (node.__mossLayoutEditor) return;
     try {
       node.__mossLayoutEditor = createEditor(node);

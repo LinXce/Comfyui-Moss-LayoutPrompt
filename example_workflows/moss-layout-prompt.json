@@ -646,7 +646,7 @@
     },
     {
       "id": 20,
-      "type": "MOSSImageLayoutPrompt",
+      "type": "MOSSImageLayoutPromptAdvance",
       "pos": [
         -780,
         180
@@ -674,6 +674,14 @@
           "type": "INT",
           "widget": {
             "name": "height"
+          },
+          "link": null
+        },
+        {
+          "name": "source",
+          "type": "STRING",
+          "widget": {
+            "name": "source"
           },
           "link": null
         },
@@ -716,16 +724,18 @@
         }
       ],
       "properties": {
-        "Node name for S&R": "MOSSImageLayoutPrompt"
+        "Node name for S&R": "MOSSImageLayoutPromptAdvance"
       },
       "widgets_values": [
         1024,
         1024,
+        "",
         "{\"width\":1024,\"height\":1024,\"bbox_coord_space\":\"abs\",\"bbox_format\":\"xyxy\",\"summary\":{\"meta\":[\"poster\",\"flat illustration\"],\"canvas\":\"single\",\"caption\":\"A minimalist travel poster on a warm cream background: a flat blue mountain range across the lower half, a pale sun disc behind the peaks, and the title EXPLORE across the top. Clean vector shapes, calm composition, restrained palette.\"},\"items\":[{\"label\":\"text\",\"caption\":\"Large dark-blue uppercase display title with even tracking and no backing panel.\",\"text\":\"EXPLORE\",\"bbox\":[128,96,896,224]},{\"label\":\"object\",\"caption\":\"Overlapping blue mountain silhouettes with snow-free ridges and a pale circular sun disc rising behind the tallest peak, rendered as flat vector shapes.\",\"bbox\":[128,288,896,640]},{\"label\":\"text\",\"caption\":\"Small dark-blue uppercase supporting line on a single row with generous spacing.\",\"text\":\"THE QUIET NORTH\",\"bbox\":[288,800,736,864]}]}"
       ],
       "widgets_values_named": {
         "width": 1024,
         "height": 1024,
+        "source": "",
         "layout": "{\"width\":1024,\"height\":1024,\"bbox_coord_space\":\"abs\",\"bbox_format\":\"xyxy\",\"summary\":{\"meta\":[\"poster\",\"flat illustration\"],\"canvas\":\"single\",\"caption\":\"A minimalist travel poster on a warm cream background: a flat blue mountain range across the lower half, a pale sun disc behind the peaks, and the title EXPLORE across the top. Clean vector shapes, calm composition, restrained palette.\"},\"items\":[{\"label\":\"text\",\"caption\":\"Large dark-blue uppercase display title with even tracking and no backing panel.\",\"text\":\"EXPLORE\",\"bbox\":[128,96,896,224]},{\"label\":\"object\",\"caption\":\"Overlapping blue mountain silhouettes with snow-free ridges and a pale circular sun disc rising behind the tallest peak, rendered as flat vector shapes.\",\"bbox\":[128,288,896,640]},{\"label\":\"text\",\"caption\":\"Small dark-blue uppercase supporting line on a single row with generous spacing.\",\"text\":\"THE QUIET NORTH\",\"bbox\":[288,800,736,864]}]}"
       },
       "title": "MOSS Layout Prompt"
