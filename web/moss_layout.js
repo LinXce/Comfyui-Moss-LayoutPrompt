@@ -512,13 +512,18 @@ function createEditor(node) {
 
   function queueSource() {
     window.clearTimeout(sourceTimer);
-    sourceTimer = window.setTimeout(applySource, SOURCE_DEBOUNCE);
+    sourceTimer = window.setTimeout(() => applySource(true), SOURCE_DEBOUNCE);
   }
 
-  function applySource() {
+  function sourceText() {
     const widget = node.widgets?.find((entry) => entry.name === SOURCE_WIDGET);
-    const text = typeof widget?.value === "string" ? widget.value.trim() : "";
-    if (!text || text === lastSourceText) return;
+    return typeof widget?.value === "string" ? widget.value.trim() : "";
+  }
+
+  function applySource(force) {
+    const text = sourceText();
+    if (!text) return;
+    if (!force && text === lastSourceText) return;
     try {
       if (loadDraftText(text, null)) lastSourceText = text;
     } catch (error) {
@@ -746,7 +751,12 @@ function createEditor(node) {
     if (!state.items.length && typeof raw === "string" && raw.trim() && !parseDraftText(raw)) {
       console.warn("[moss-layoutPrompt] no draft JSON found in the layout widget");
     }
-    if (state.items.length) return;
+    if (state.items.length) {
+      // The saved canvas draft wins: mark the existing source text as already
+      // handled so a reload never replays it over later edits.
+      lastSourceText = sourceText();
+      return;
+    }
     applySource();
   }
 

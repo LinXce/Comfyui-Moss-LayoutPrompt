@@ -103,6 +103,9 @@ MOSS-Image 旧版 scene schema（`scene_type` / `gen_brief` / `elements`），�
 如果是已编译的 `abs_centralized`/`yxyx` 提示词，会先用节点的 `width`/`height` 反解回草稿。
 没有编辑器时 `source` 会被直接编译，但仅当画布上没有框。
 
+编辑或粘贴 `source` 会**立即重新应用**（即使文本内容没变，也会重新载入以替换画布）；
+但刷新界面不会重放它：只要画布上有框，就以画布草稿为准。
+
 字段规范、坐标系与构图要求见 MOSS-Image 仓库中的
 [references/layout.md](https://github.com/OpenMOSS/MOSS-Image/blob/main/skills/moss-image-prompt-enhancer/references/layout.md)
 与[用户指南](https://github.com/OpenMOSS/MOSS-Image/blob/main/USERGUIDE_ZH.md)。

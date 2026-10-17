@@ -122,6 +122,10 @@ compiled `abs_centralized`/`yxyx` prompt is decoded back with the node's
 `width`/`height` first. Without the canvas editor, `source` is compiled
 directly, but only when the canvas holds no boxes.
 
+Editing or pasting into `source` always re-applies it — even when the text ends
+up unchanged — so it can replace the canvas at any time. A reload never
+re-applies it: once the canvas holds boxes, its draft wins.
+
 The vocabulary, coordinate system and composition rules are documented in the
 MOSS-Image repository:
 [references/layout.md](https://github.com/OpenMOSS/MOSS-Image/blob/main/skills/moss-image-prompt-enhancer/references/layout.md)
