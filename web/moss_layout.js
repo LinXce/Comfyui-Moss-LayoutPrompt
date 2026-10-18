@@ -502,17 +502,19 @@ function createEditor(node) {
   ensureStyle();
   const isAdvance = node.comfyClass === ADVANCE_CLASS || node.type === ADVANCE_CLASS;
 
-  const sizeWidgets = {};
-  for (const name of SIZE_WIDGETS) {
-    sizeWidgets[name] = node.widgets?.find((widget) => widget.name === name);
+  // The frontend can replace widget objects, so always look them up by name
+  // instead of holding references taken at creation time.
+  function widgetByName(name) {
+    return node.widgets?.find((widget) => widget.name === name);
   }
+
   let sourceTimer = 0;
   let lastSourceText = "";
   let styledSource = null;
 
-  function queueSource() {
+  function queueSource(force) {
     window.clearTimeout(sourceTimer);
-    sourceTimer = window.setTimeout(() => applySource(true), SOURCE_DEBOUNCE);
+    sourceTimer = window.setTimeout(() => applySource(force === true), SOURCE_DEBOUNCE);
   }
 
   function sourceText() {
@@ -531,8 +533,10 @@ function createEditor(node) {
     }
   }
 
-  function watchSource() {
-    const widget = node.widgets?.find((entry) => entry.name === SOURCE_WIDGET);
+  function watchWidgets() {
+    hideLayoutWidget();
+    wireSizeWidgets();
+    const widget = widgetByName(SOURCE_WIDGET);
     if (!widget) return;
     if (widget.__mlpSource !== true) {
       widget.__mlpSource = true;
@@ -553,7 +557,7 @@ function createEditor(node) {
       element.style.height = `${SOURCE_WIDGET_HEIGHT}px`;
       element.style.minHeight = `${SOURCE_WIDGET_HEIGHT}px`;
       element.style.maxHeight = `${SOURCE_WIDGET_HEIGHT}px`;
-      element.addEventListener("input", queueSource);
+      element.addEventListener("input", () => queueSource(true));
     }
     applySource();
   }
@@ -631,8 +635,15 @@ function createEditor(node) {
     getMinHeight: () => EDITOR_MIN_HEIGHT,
   });
 
-  layoutWidget.hidden = true;
-  layoutWidget.computeSize = () => [0, -4];
+  hideLayoutWidget();
+
+  function hideLayoutWidget() {
+    const widget = widgetByName(LAYOUT_WIDGET);
+    if (!widget || widget.__mlpHidden === true) return;
+    widget.__mlpHidden = true;
+    widget.hidden = true;
+    widget.computeSize = () => [0, -4];
+  }
 
   function fitBox(box) {
     const x1 = Math.min(Math.max(Math.round(box[0]), 0), state.width - MIN_BOX);
@@ -643,13 +654,13 @@ function createEditor(node) {
   }
 
   function sizeValue(name, fallback) {
-    const value = Number(sizeWidgets[name]?.value);
+    const value = Number(widgetByName(name)?.value);
     if (Number.isFinite(value) && value >= MIN_SIZE) return Math.round(value);
     return fallback ?? DEFAULT_SIZE;
   }
 
   function writeSize(name, value) {
-    const widget = sizeWidgets[name];
+    const widget = widgetByName(name);
     if (widget && Number(widget.value) !== value) widget.value = value;
   }
 
@@ -741,12 +752,14 @@ function createEditor(node) {
   }
 
   function sync() {
-    layoutWidget.value = JSON.stringify(buildDraft());
+    hideLayoutWidget();
+    const widget = widgetByName(LAYOUT_WIDGET);
+    if (widget) widget.value = JSON.stringify(buildDraft());
     previewBody.value = compiledPrompt();
   }
 
   function load() {
-    const raw = layoutWidget.value;
+    const raw = widgetByName(LAYOUT_WIDGET)?.value ?? "";
     applyDraft(parseDraftText(raw));
     if (!state.items.length && typeof raw === "string" && raw.trim() && !parseDraftText(raw)) {
       console.warn("[moss-layoutPrompt] no draft JSON found in the layout widget");
@@ -1272,23 +1285,28 @@ function createEditor(node) {
   window.addEventListener("pointerup", endDrag);
   window.addEventListener("pointercancel", endDrag);
 
-  for (const name of SIZE_WIDGETS) {
-    const sizeWidget = sizeWidgets[name];
-    if (!sizeWidget) continue;
-    const original = sizeWidget.callback;
-    sizeWidget.callback = function (...args) {
-      const result = original?.apply(this, args);
-      const value = Math.round(Number(sizeWidget.value));
-      if (Number.isFinite(value) && value >= MIN_SIZE) {
-        state[name] = value;
-        for (const item of state.items) item.bbox = fitBox(item.bbox);
-        render();
-        sync();
-        draw();
-      }
-      return result;
-    };
+  function wireSizeWidgets() {
+    for (const name of SIZE_WIDGETS) {
+      const widget = widgetByName(name);
+      if (!widget || widget.__mlpSize === true) continue;
+      widget.__mlpSize = true;
+      const original = widget.callback;
+      widget.callback = function (...args) {
+        const result = original?.apply(this, args);
+        const value = Math.round(Number(widget.value));
+        if (Number.isFinite(value) && value >= MIN_SIZE) {
+          state[name] = value;
+          for (const item of state.items) item.bbox = fitBox(item.bbox);
+          render();
+          sync();
+          draw();
+        }
+        return result;
+      };
+    }
   }
+
+  wireSizeWidgets();
 
   const onConfigure = node.onConfigure;
   node.onConfigure = function (...args) {
@@ -1307,11 +1325,11 @@ function createEditor(node) {
   load();
   render();
   sync();
-  watchSource();
-  const sourceWatch = window.setInterval(watchSource, SOURCE_POLL);
+  watchWidgets();
+  const widgetWatch = window.setInterval(watchWidgets, SOURCE_POLL);
   const onRemoved = node.onRemoved;
   node.onRemoved = function (...args) {
-    window.clearInterval(sourceWatch);
+    window.clearInterval(widgetWatch);
     window.clearTimeout(sourceTimer);
     return onRemoved?.apply(this, args);
   };

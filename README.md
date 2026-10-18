@@ -123,8 +123,9 @@ compiled `abs_centralized`/`yxyx` prompt is decoded back with the node's
 directly, but only when the canvas holds no boxes.
 
 Editing or pasting into `source` always re-applies it — even when the text ends
-up unchanged — so it can replace the canvas at any time. A reload never
-re-applies it: once the canvas holds boxes, its draft wins.
+up unchanged — so it can replace the canvas at any time. Reloading the page or
+running the workflow never re-applies it: once the canvas holds boxes, its draft
+wins.
 
 The vocabulary, coordinate system and composition rules are documented in the
 MOSS-Image repository:
