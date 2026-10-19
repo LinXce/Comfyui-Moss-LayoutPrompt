@@ -73,6 +73,13 @@ canvas size.
 - Drag on empty canvas to create a box, drag inside a box to move it, and drag
   the dot at its bottom-right corner to resize it — the dot shows on hover or on
   the selected box. A box can also be typed as `x1, y1, x2, y2`.
+- Each box row carries its geometry twice: the pixel values `x1, y1, x2, y2` and,
+  right below them, the same four edges as a percentage of the canvas. Both rows
+  are editable — the canvas follows as you type, and every value is clamped to
+  the canvas with the opposite edge at least 8px away.
+- `对齐到 8` rounds all four edges of every box up to a multiple of 8, so widths
+  and heights land on the same grid — handy when the layout has to line up with a
+  latent grid. Boxes stay inside the canvas and never collapse to zero size.
 - The right panel edits the summary prompt and one row per box: `label`
   (`object`, `character`, `text`), `caption` describing how the element looks,
   and for text items the exact `text` to render. `caption`, `text` and the
