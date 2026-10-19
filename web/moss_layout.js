@@ -13,6 +13,7 @@ const FALLBACK_COLOR = "#8a8f98";
 const PALETTE = ["#4a9eff", "#ff9147", "#59d97f", "#ff6b8b", "#c084fc", "#facc15", "#22d3ee", "#f5f5f5"];
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const MIN_BOX = 8;
+const SNAP_STEP = 8;
 const MIN_SIZE = 16;
 const EDITOR_MIN_HEIGHT = 420;
 const MIN_NODE_WIDTH = 980;
@@ -61,12 +62,22 @@ const CSS = `
   border-color:#4a9eff;box-shadow:0 0 0 2px rgba(74,158,255,.18)}
 .mlp-textarea{resize:vertical;overflow:hidden;line-height:1.55}
 .mlp-select{width:auto;min-width:110px;padding:4px 8px;cursor:pointer}
-.mlp-bbox{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.mlp-bbox{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;align-items:start}
 .mlp-num{width:100%;box-sizing:border-box;border:1px solid #343b47;background:#121519;color:#e2e5ea;
   border-radius:6px;padding:5px 6px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;
-  text-align:center;outline:none;transition:border-color .12s,box-shadow .12s}
+  text-align:center;outline:none;transition:border-color .12s,box-shadow .12s;
+  -moz-appearance:textfield;appearance:textfield}
+.mlp-num::-webkit-outer-spin-button,.mlp-num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .mlp-num:focus{border-color:#4a9eff;box-shadow:0 0 0 2px rgba(74,158,255,.18)}
+.mlp-num-cell{display:block;min-width:0}
 .mlp-num-cell small{display:block;margin-bottom:2px;text-align:center;font-size:10px;color:#6b7380}
+.mlp-num-wrap{position:relative;display:block;min-width:0;margin-top:3px}
+.mlp-num-pct{padding:4px 13px 4px 4px;font-size:11px;color:#9fb4cc}
+.mlp-num-pct:focus{color:#e2e5ea}
+.mlp-unit{position:absolute;right:5px;top:50%;transform:translateY(-50%);font-size:10px;
+  color:#6b7380;pointer-events:none}
+.mlp-status{margin-left:6px;font-size:11px;color:#7fbf8f;white-space:nowrap}
+.mlp-status:empty{display:none}
 .mlp-chips{display:flex;flex-wrap:wrap;align-items:center;gap:4px;min-height:34px;box-sizing:border-box;
   padding:4px 6px;border:1px solid #343b47;border-radius:6px;background:#121519;cursor:text}
 .mlp-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 4px 2px 9px;border-radius:999px;
@@ -95,7 +106,7 @@ const CSS = `
 .mlp-swatch::-webkit-color-swatch-wrapper{padding:0}
 .mlp-swatch::-webkit-color-swatch{border:0;border-radius:3px}
 .mlp-swatch::-moz-color-swatch{border:0;border-radius:3px}
-.mlp-toolbar{display:flex;align-items:center;gap:6px;margin:2px 0}
+.mlp-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:2px 0}
 .mlp-count{margin-left:auto;color:#6b7380;font-size:11px}
 .mlp-hint{color:#6b7380;font-size:11px;padding:0 2px 4px;margin-top:-2px}
 .mlp-empty{color:#6b7380;text-align:center;padding:14px 8px;border:1px dashed #343b47;border-radius:8px}
@@ -593,6 +604,17 @@ function createEditor(node) {
   let hover = -1;
   let drag = null;
   let cards = [];
+  let statusLine = null;
+  let statusTimer = 0;
+
+  function flash(message) {
+    if (!statusLine) return;
+    statusLine.textContent = message;
+    window.clearTimeout(statusTimer);
+    statusTimer = window.setTimeout(() => {
+      if (statusLine) statusLine.textContent = "";
+    }, 2600);
+  }
 
   const canvas = h("canvas", { class: "mlp-canvas" });
   const context = canvas.getContext("2d");
@@ -651,6 +673,63 @@ function createEditor(node) {
     const x2 = Math.min(Math.max(Math.round(box[2]), x1 + MIN_BOX), state.width);
     const y2 = Math.min(Math.max(Math.round(box[3]), y1 + MIN_BOX), state.height);
     return [x1, y1, x2, y2];
+  }
+
+  // Edges alternate width/height: x1,y1,x2,y2 -> width,height,width,height.
+  function edgeLimit(position) {
+    return position % 2 === 0 ? state.width : state.height;
+  }
+
+  // Move a single edge to `value`, keeping the box inside the canvas and at least
+  // MIN_BOX thick. Only the edited edge moves, so manual typing never drags the
+  // opposite edge around the way a whole-box fit would.
+  function setEdge(item, position, value) {
+    const limit = edgeLimit(position);
+    const box = item.bbox.slice();
+    const target = Math.round(Math.min(Math.max(value, 0), limit));
+    if (position < 2) {
+      const far = box[position + 2];
+      box[position] = Math.max(Math.min(target, far - MIN_BOX), 0);
+    } else {
+      const near = box[position - 2];
+      box[position] = Math.min(Math.max(target, near + MIN_BOX), limit);
+    }
+    item.bbox = box;
+  }
+
+  function formatPercent(value, limit) {
+    if (!(limit > 0)) return "0";
+    return String(Math.round((value / limit) * 10000) / 100);
+  }
+
+  function snapBox(box) {
+    const maxX = Math.max(SNAP_STEP * 2, Math.floor(state.width / SNAP_STEP) * SNAP_STEP);
+    const maxY = Math.max(SNAP_STEP * 2, Math.floor(state.height / SNAP_STEP) * SNAP_STEP);
+    const up = (value) => Math.ceil(value / SNAP_STEP) * SNAP_STEP;
+    const x1 = Math.min(up(box[0]), maxX - SNAP_STEP);
+    const y1 = Math.min(up(box[1]), maxY - SNAP_STEP);
+    const x2 = Math.max(Math.min(up(box[2]), maxX), x1 + SNAP_STEP);
+    const y2 = Math.max(Math.min(up(box[3]), maxY), y1 + SNAP_STEP);
+    return [x1, y1, x2, y2];
+  }
+
+  function alignBoxes() {
+    if (!state.items.length) {
+      window.alert("还没有可以对齐的框。");
+      return;
+    }
+    let changed = 0;
+    state.items.forEach((item, index) => {
+      const next = snapBox(item.bbox);
+      if (next.some((value, position) => value !== item.bbox[position])) changed += 1;
+      item.bbox = next;
+      // Repaint the inputs in place: a full render would scroll the list back to
+      // the top and drop the user's place.
+      writeBboxInputs(index, false);
+    });
+    sync();
+    draw();
+    flash(changed ? `已对齐 ${changed} 个框` : "所有框已经是 8 的整数倍");
   }
 
   function sizeValue(name, fallback) {
@@ -798,12 +877,17 @@ function createEditor(node) {
     return true;
   }
 
-  function writeBboxInputs(index) {
+  function writeBboxInputs(index, skipFocused = true) {
     const card = cards[index];
     const item = state.items[index];
     if (!card || !item) return;
-    card.inputs.forEach((input, position) => {
-      if (document.activeElement !== input) input.value = String(item.bbox[position]);
+    item.bbox.forEach((value, position) => {
+      const pixel = card.inputs[position];
+      if (pixel && (!skipFocused || document.activeElement !== pixel)) pixel.value = String(value);
+      const percent = card.pcts?.[position];
+      if (percent && (!skipFocused || document.activeElement !== percent)) {
+        percent.value = formatPercent(value, edgeLimit(position));
+      }
     });
   }
 
@@ -827,30 +911,73 @@ function createEditor(node) {
 
   function bboxField(item, index) {
     const names = ["x1", "y1", "x2", "y2"];
-    const inputs = names.map((name, position) => {
-      const input = h("input", {
+    const pixels = [];
+    const percents = [];
+
+    const cells = names.map((name, position) => {
+      const pixel = h("input", {
         class: "mlp-num",
         type: "number",
         step: "1",
+        min: "0",
+        title: `${name} · 像素坐标`,
+        onkeydown: (event) => event.stopPropagation(),
         oninput: () => {
-          const values = inputs.map((element) => (element.value.trim() === "" ? NaN : Number(element.value)));
-          if (values.some((value) => !Number.isFinite(value))) return;
-          item.bbox = fitBox(values);
+          const text = pixel.value.trim();
+          if (text === "") return;
+          const value = Number(text);
+          if (!Number.isFinite(value)) return;
+          setEdge(item, position, value);
+          writeBboxInputs(index);
           draw();
           sync();
         },
         onchange: () => {
-          writeBboxInputs(index);
+          writeBboxInputs(index, false);
+          draw();
           sync();
         },
       });
-      return h("label", { class: "mlp-num-cell" }, [h("small", { text: name }), input]);
+
+      const percent = h("input", {
+        class: "mlp-num mlp-num-pct",
+        type: "number",
+        step: "0.01",
+        min: "0",
+        max: "100",
+        title: `${name} · 占画布百分比`,
+        onkeydown: (event) => event.stopPropagation(),
+        oninput: () => {
+          const text = percent.value.trim();
+          if (text === "") return;
+          const value = Number(text);
+          if (!Number.isFinite(value)) return;
+          setEdge(item, position, (value / 100) * edgeLimit(position));
+          writeBboxInputs(index);
+          draw();
+          sync();
+        },
+        onchange: () => {
+          writeBboxInputs(index, false);
+          draw();
+          sync();
+        },
+      });
+
+      pixels.push(pixel);
+      percents.push(percent);
+      return h("label", { class: "mlp-num-cell" }, [
+        h("small", { text: name }),
+        pixel,
+        h("span", { class: "mlp-num-wrap" }, [percent, h("span", { class: "mlp-unit", text: "%" })]),
+      ]);
     });
-    const controls = inputs.map((cell) => cell.querySelector("input"));
-    controls.forEach((input, position) => {
-      input.value = String(item.bbox[position]);
+
+    names.forEach((name, position) => {
+      pixels[position].value = String(item.bbox[position]);
+      percents[position].value = formatPercent(item.bbox[position], edgeLimit(position));
     });
-    return { element: h("div", { class: "mlp-bbox" }, inputs), inputs: controls };
+    return { element: h("div", { class: "mlp-bbox" }, cells), inputs: pixels, pcts: percents };
   }
 
   function colorPicker(item, index) {
@@ -932,7 +1059,7 @@ function createEditor(node) {
     }
 
     const bbox = bboxField(item, index);
-    children.push(field("位置 · 画布像素坐标", bbox.element));
+    children.push(field("位置 · 像素坐标（下行为占画布百分比）", bbox.element));
 
     const element = h("div", {
       class: index === selection ? "mlp-card is-active" : "mlp-card",
@@ -940,7 +1067,7 @@ function createEditor(node) {
         if (selection !== index) selectIndex(index);
       },
     }, children);
-    cards[index] = { element, inputs: bbox.inputs };
+    cards[index] = { element, inputs: bbox.inputs, pcts: bbox.pcts };
     return element;
   }
 
@@ -965,6 +1092,7 @@ function createEditor(node) {
   }
 
   function toolbar() {
+    statusLine = h("span", { class: "mlp-status" });
     return h("div", { class: "mlp-toolbar" }, [
       h("button", {
         type: "button",
@@ -998,6 +1126,13 @@ function createEditor(node) {
         text: "从文件导入",
         onclick: () => fileInput.click(),
       }),
+      h("button", {
+        type: "button",
+        class: "mlp-btn",
+        title: `把所有框的四个坐标向上对齐到 ${SNAP_STEP} 的整数倍`,
+        text: `对齐到 ${SNAP_STEP}`,
+        onclick: () => alignBoxes(),
+      }),
       isAdvance ? h("button", {
         type: "button",
         class: "mlp-btn mlp-btn-danger",
@@ -1006,6 +1141,7 @@ function createEditor(node) {
         onclick: () => clearAll(),
       }) : null,
       h("span", { class: "mlp-count", text: `${state.items.length} 个框` }),
+      statusLine,
     ]);
   }
 
@@ -1020,7 +1156,7 @@ function createEditor(node) {
       ...rows,
       h("div", {
         class: "mlp-hint",
-        text: "空白处拖动新建框 · 框内拖动移动 · 悬停后拖右下角圆点缩放",
+        text: "空白处拖动新建框 · 框内拖动移动 · 悬停后拖右下角圆点缩放 · 右侧可手输像素或百分比微调",
       }),
     );
     list.querySelectorAll(".mlp-textarea").forEach(autosize);
@@ -1331,6 +1467,7 @@ function createEditor(node) {
   node.onRemoved = function (...args) {
     window.clearInterval(widgetWatch);
     window.clearTimeout(sourceTimer);
+    window.clearTimeout(statusTimer);
     return onRemoved?.apply(this, args);
   };
   const onResize = node.onResize;
