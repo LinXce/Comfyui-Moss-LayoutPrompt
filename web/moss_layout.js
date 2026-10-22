@@ -14,6 +14,10 @@ const PALETTE = ["#4a9eff", "#ff9147", "#59d97f", "#ff6b8b", "#c084fc", "#facc15
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const MIN_BOX = 8;
 const SNAP_STEP = 8;
+const BADGE_RADIUS = 8;
+const BADGE_OFFSET = 10;
+const BADGE_SLACK = 4;
+const CYCLE_SLACK = 4;
 const MIN_SIZE = 16;
 const EDITOR_MIN_HEIGHT = 420;
 const MIN_NODE_WIDTH = 980;
@@ -109,6 +113,9 @@ const CSS = `
 .mlp-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:2px 0}
 .mlp-count{margin-left:auto;color:#6b7380;font-size:11px}
 .mlp-hint{color:#6b7380;font-size:11px;padding:0 2px 4px;margin-top:-2px}
+.mlp-chip-hint{position:absolute;z-index:2;pointer-events:none;display:none;padding:2px 7px;border-radius:5px;
+  background:rgba(18,21,25,.92);border:1px solid rgba(255,255,255,.16);color:#c4cad4;
+  font:11px/1.6 ui-sans-serif,system-ui,sans-serif;white-space:nowrap}
 .mlp-empty{color:#6b7380;text-align:center;padding:14px 8px;border:1px dashed #343b47;border-radius:8px}
 `;
 
@@ -587,6 +594,8 @@ function createEditor(node) {
     state.summary = { caption: "", meta: [], canvas: "single", palette: null };
     selection = -1;
     hover = -1;
+    overlap = 0;
+    resetCycle();
     clearSource();
     render();
     sync();
@@ -604,6 +613,8 @@ function createEditor(node) {
   let hover = -1;
   let drag = null;
   let cards = [];
+  let overlap = 0;
+  const cycle = { point: null, stack: [], index: 0 };
   let statusLine = null;
   let statusTimer = 0;
 
@@ -616,9 +627,16 @@ function createEditor(node) {
     }, 2600);
   }
 
+  function resetCycle() {
+    cycle.point = null;
+    cycle.stack = [];
+    cycle.index = 0;
+  }
+
   const canvas = h("canvas", { class: "mlp-canvas" });
   const context = canvas.getContext("2d");
-  const stage = h("div", { class: "mlp-stage" }, [canvas]);
+  const overlapChip = h("div", { class: "mlp-chip-hint" });
+  const stage = h("div", { class: "mlp-stage" }, [canvas, overlapChip]);
   const list = h("div", { class: "mlp-list" });
   const previewBody = h("textarea", {
     class: "mlp-preview-body",
@@ -778,6 +796,9 @@ function createEditor(node) {
     };
     state.items = (Array.isArray(source.items) ? source.items : []).map(normalizeItem).filter(Boolean);
     selection = -1;
+    hover = -1;
+    overlap = 0;
+    resetCycle();
     writeSize("width", state.width);
     writeSize("height", state.height);
   }
@@ -1035,6 +1056,8 @@ function createEditor(node) {
         onclick: () => {
           state.items.splice(index, 1);
           selection = -1;
+          overlap = 0;
+          resetCycle();
           render();
           sync();
           draw();
@@ -1064,6 +1087,7 @@ function createEditor(node) {
     const element = h("div", {
       class: index === selection ? "mlp-card is-active" : "mlp-card",
       onpointerdown: () => {
+        resetCycle();
         if (selection !== index) selectIndex(index);
       },
     }, children);
@@ -1156,7 +1180,7 @@ function createEditor(node) {
       ...rows,
       h("div", {
         class: "mlp-hint",
-        text: "空白处拖动新建框 · 框内拖动移动 · 悬停后拖右下角圆点缩放 · 右侧可手输像素或百分比微调",
+        text: "空白处拖动新建框 · 拖左上角数字标移动该框（重叠时最可靠）· 重叠处重复点击切换 · 悬停后拖右下角圆点缩放 · 右侧可手输像素或百分比微调",
       }),
     );
     list.querySelectorAll(".mlp-textarea").forEach(autosize);
@@ -1166,6 +1190,7 @@ function createEditor(node) {
   function addItem(box) {
     state.items.push({ label: "object", caption: "", text: "", bbox: fitBox(box) });
     selection = state.items.length - 1;
+    resetCycle();
     render();
     sync();
     draw();
@@ -1188,18 +1213,6 @@ function createEditor(node) {
     context.strokeStyle = color;
     context.strokeRect(left + 0.5, top + 0.5, width - 1, height - 1);
 
-    if (width > 16 && height > 16) {
-      context.beginPath();
-      context.arc(left + 10, top + 10, 8, 0, Math.PI * 2);
-      context.fillStyle = color;
-      context.fill();
-      context.fillStyle = "#101318";
-      context.font = "bold 10px ui-sans-serif, system-ui, sans-serif";
-      context.textAlign = "center";
-      context.textBaseline = "middle";
-      context.fillText(String(index + 1), left + 10, top + 10.5);
-    }
-
     const label = item.label === "text" && item.text ? item.text : item.caption;
     if (label && width > 46 && height > 30) {
       context.save();
@@ -1213,16 +1226,66 @@ function createEditor(node) {
       context.fillText(truncate(context, label.split("\n")[0], width - 12), left + 6, top + 20);
       context.restore();
     }
+  }
 
-    if (active || index === hover) {
-      context.beginPath();
-      context.arc(left + width, top + height, 5, 0, Math.PI * 2);
-      context.fillStyle = "#f2f4f7";
-      context.fill();
-      context.lineWidth = 1.5;
-      context.strokeStyle = rgba(color, 0.9);
+  function badgeVisible(item) {
+    const [x1, y1, x2, y2] = item.bbox;
+    return (x2 - x1) * view.scale > MIN_SIZE && (y2 - y1) * view.scale > MIN_SIZE;
+  }
+
+  function badgeCenter(item) {
+    return {
+      x: view.x + item.bbox[0] * view.scale + BADGE_OFFSET,
+      y: view.y + item.bbox[1] * view.scale + BADGE_OFFSET,
+    };
+  }
+
+  function drawHandle(item, index, scale) {
+    if (index !== selection && index !== hover) return;
+    const [x1, y1, x2, y2] = item.bbox;
+    const left = view.x + x1 * scale;
+    const top = view.y + y1 * scale;
+    context.beginPath();
+    context.arc(left + (x2 - x1) * scale, top + (y2 - y1) * scale, 5, 0, Math.PI * 2);
+    context.fillStyle = "#f2f4f7";
+    context.fill();
+    context.lineWidth = 1.5;
+    context.strokeStyle = rgba(colorOf(item), 0.9);
+    context.stroke();
+  }
+
+  function drawBadge(item, index) {
+    if (!badgeVisible(item)) return;
+    const center = badgeCenter(item);
+    context.beginPath();
+    context.arc(center.x, center.y, BADGE_RADIUS, 0, Math.PI * 2);
+    context.fillStyle = colorOf(item);
+    context.fill();
+    if (index === selection) {
+      context.lineWidth = 2;
+      context.strokeStyle = "#f2f4f7";
       context.stroke();
     }
+    context.fillStyle = "#101318";
+    context.font = "bold 10px ui-sans-serif, system-ui, sans-serif";
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText(String(index + 1), center.x, center.y + 0.5);
+  }
+
+  function drawOverlay(scale) {
+    state.items.forEach((item, index) => drawHandle(item, index, scale));
+
+    const order = state.items
+      .map((item, index) => index)
+      .sort((a, b) => {
+        const area = (index) => {
+          const box = state.items[index].bbox;
+          return (box[2] - box[0]) * (box[3] - box[1]);
+        };
+        return area(b) - area(a) || a - b;
+      });
+    for (const index of order) drawBadge(state.items[index], index);
   }
 
   function draw() {
@@ -1267,6 +1330,7 @@ function createEditor(node) {
     context.strokeRect(view.x + 0.5, view.y + 0.5, state.width * scale - 1, state.height * scale - 1);
 
     state.items.forEach((item, index) => drawItem(item, index, scale));
+    drawOverlay(scale);
     app.graph?.setDirtyCanvas(true, false);
   }
 
@@ -1284,6 +1348,12 @@ function createEditor(node) {
     };
   }
 
+  function toCanvas(event) {
+    const rect = canvas.getBoundingClientRect();
+    const zoom = screenScale(rect);
+    return { x: (event.clientX - rect.left) / zoom, y: (event.clientY - rect.top) / zoom };
+  }
+
   function handleBoxAt(point) {
     const radius = 12 / (view.scale * screenScale());
     for (let index = state.items.length - 1; index >= 0; index -= 1) {
@@ -1293,39 +1363,100 @@ function createEditor(node) {
     return -1;
   }
 
-  function itemAt(point) {
+  function itemsAt(point) {
+    const stack = [];
     for (let index = state.items.length - 1; index >= 0; index -= 1) {
       const [x1, y1, x2, y2] = state.items[index].bbox;
-      if (point.x >= x1 && point.x <= x2 && point.y >= y1 && point.y <= y2) return index;
+      if (point.x >= x1 && point.x <= x2 && point.y >= y1 && point.y <= y2) stack.push(index);
     }
-    return -1;
+    return stack;
+  }
+
+  // 数字标是最小但最可靠的抓手：它画在所有框之上，所以永远能被点到。
+  // 注意：badgeCenter() 返回的是画布 CSS 坐标（给绘制用），这里必须换算回图像坐标。
+  function badgeItemAt(point) {
+    const scale = view.scale || 1;
+    const limit = BADGE_RADIUS + BADGE_SLACK;
+    let best = -1;
+    let bestDistance = Infinity;
+    let bestArea = Infinity;
+    state.items.forEach((item, index) => {
+      if (!badgeVisible(item)) return;
+      const [x1, y1, x2, y2] = item.bbox;
+      const centerX = x1 + BADGE_OFFSET / scale;
+      const centerY = y1 + BADGE_OFFSET / scale;
+      const distance = Math.hypot(point.x - centerX, point.y - centerY) * scale;
+      if (distance > limit) return;
+      const area = (x2 - x1) * (y2 - y1);
+      // 距离优先；同样命中时取更小的框（也就是更靠内的那个）。
+      if (distance < bestDistance - 0.5 || (Math.abs(distance - bestDistance) <= 0.5 && area < bestArea)) {
+        best = index;
+        bestDistance = distance;
+        bestArea = area;
+      }
+    });
+    return best;
+  }
+
+  function samePoint(a, b) {
+    if (!a || !b) return false;
+    return Math.hypot(a.x - b.x, a.y - b.y) <= CYCLE_SLACK / Math.max(view.scale, 1e-6);
+  }
+
+  // 同一处重复点击时在重叠栈里轮换；首次点击则保持当前选中（若它就在栈里），
+  // 这样"已经选中内层框再拖"不会被外层抢走。
+  function pickFromStack(stack, point) {
+    const repeat =
+      samePoint(cycle.point, point) &&
+      cycle.stack.length === stack.length &&
+      cycle.stack.every((value, position) => value === stack[position]);
+    const current = stack.indexOf(selection);
+    const cursor = repeat ? (cycle.index + 1) % stack.length : current >= 0 ? current : 0;
+    cycle.point = { x: point.x, y: point.y };
+    cycle.stack = stack.slice();
+    cycle.index = cursor;
+    return stack[cursor];
   }
 
   canvas.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || event.isPrimary === false) return;
     event.preventDefault();
     event.stopPropagation();
+    hideOverlapChip();
     try {
       canvas.setPointerCapture(event.pointerId);
     } catch (error) {
       console.warn("[moss-layoutPrompt] pointer capture unavailable, dragging via window events", error);
     }
     const point = toImage(event);
+    const badge = badgeItemAt(point);
+    if (badge >= 0) {
+      resetCycle();
+      drag = { mode: "move", index: badge, box: state.items[badge].bbox.slice(), origin: point, moved: false };
+      selectIndex(badge);
+      hover = badge;
+      return;
+    }
     const handle = handleBoxAt(point);
     if (handle >= 0) {
+      resetCycle();
+      drag = { mode: "resize", index: handle, box: state.items[handle].bbox.slice(), moved: false };
       selectIndex(handle);
       hover = handle;
-      drag = { mode: "resize", index: handle, box: state.items[handle].bbox.slice() };
       return;
     }
-    const index = itemAt(point);
-    if (index >= 0) {
+    const stack = itemsAt(point);
+    if (stack.length) {
+      const index = pickFromStack(stack, point);
+      drag = { mode: "move", index, box: state.items[index].bbox.slice(), origin: point, moved: false };
       selectIndex(index);
-      drag = { mode: "move", index, box: state.items[index].bbox.slice(), origin: point };
+      hover = index;
       return;
     }
+    resetCycle();
     selection = -1;
     hover = -1;
+    overlap = 0;
     cards.forEach((card) => card.element.classList.remove("is-active"));
     draw();
     drag = { mode: "create", index: -1, origin: point, moved: false };
@@ -1337,7 +1468,11 @@ function createEditor(node) {
       const height = drag.box[3] - drag.box[1];
       const x = Math.min(Math.max(Math.round(drag.box[0] + point.x - drag.origin.x), 0), state.width - width);
       const y = Math.min(Math.max(Math.round(drag.box[1] + point.y - drag.origin.y), 0), state.height - height);
-      state.items[drag.index].bbox = [x, y, x + width, y + height];
+      const next = [x, y, x + width, y + height];
+      if (next.every((value, position) => value === state.items[drag.index].bbox[position])) return;
+      drag.moved = true;
+      resetCycle();
+      state.items[drag.index].bbox = next;
       writeBboxInputs(drag.index);
       draw();
       return;
@@ -1347,7 +1482,10 @@ function createEditor(node) {
       const [x1, y1] = drag.box;
       const x2 = Math.min(Math.max(Math.round(point.x), x1 + MIN_BOX), state.width);
       const y2 = Math.min(Math.max(Math.round(point.y), y1 + MIN_BOX), state.height);
-      state.items[drag.index].bbox = [x1, y1, x2, y2];
+      const next = [x1, y1, x2, y2];
+      if (next.every((value, position) => value === state.items[drag.index].bbox[position])) return;
+      drag.moved = true;
+      state.items[drag.index].bbox = next;
       writeBboxInputs(drag.index);
       draw();
       return;
@@ -1376,23 +1514,57 @@ function createEditor(node) {
     draw();
   }
 
+  // 只量一次尺寸，之后每次 move 只写 left/top，避免逐帧强制布局。
+  const chipSize = { count: -1, width: 0, height: 0 };
+
+  function showOverlapChip(position, count) {
+    if (chipSize.count !== count) {
+      overlapChip.textContent = `重复点击切换 · ${count} 个框重叠`;
+      overlapChip.style.display = "block";
+      chipSize.count = count;
+      chipSize.width = overlapChip.offsetWidth;
+      chipSize.height = overlapChip.offsetHeight;
+    } else if (overlapChip.style.display !== "block") {
+      overlapChip.style.display = "block";
+    }
+    let left = position.x + 14;
+    let top = position.y + 14;
+    if (left + chipSize.width > stage.clientWidth - 4) left = Math.max(4, position.x - chipSize.width - 14);
+    if (top + chipSize.height > stage.clientHeight - 4) top = Math.max(4, position.y - chipSize.height - 14);
+    overlapChip.style.left = `${left}px`;
+    overlapChip.style.top = `${top}px`;
+  }
+
+  function hideOverlapChip() {
+    overlapChip.style.display = "none";
+  }
+
   canvas.addEventListener("pointermove", (event) => {
     const point = toImage(event);
+    const position = toCanvas(event);
     if (!drag) {
-      const handle = handleBoxAt(point);
-      if (handle !== hover) {
-        hover = handle;
-        draw();
-      }
-      canvas.style.cursor = handle >= 0 ? "nwse-resize" : itemAt(point) >= 0 ? "move" : "crosshair";
+      const badge = badgeItemAt(point);
+      const handle = badge >= 0 ? -1 : handleBoxAt(point);
+      const stack = badge < 0 && handle < 0 ? itemsAt(point) : [];
+      const target = badge >= 0 ? badge : handle >= 0 ? handle : stack.length ? stack[0] : -1;
+      const count = stack.length;
+      const dirty = target !== hover || count !== overlap;
+      hover = target;
+      overlap = count;
+      canvas.style.cursor = badge >= 0 ? "grab" : handle >= 0 ? "nwse-resize" : count ? "move" : "crosshair";
+      if (count > 1) showOverlapChip(position, count);
+      else hideOverlapChip();
+      if (dirty) draw();
       return;
     }
+    hideOverlapChip();
     event.preventDefault();
     event.stopPropagation();
     applyDrag(point);
   });
 
   canvas.addEventListener("pointerleave", () => {
+    hideOverlapChip();
     if (drag || hover < 0) return;
     hover = -1;
     draw();

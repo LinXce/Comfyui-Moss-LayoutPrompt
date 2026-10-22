@@ -73,6 +73,12 @@ canvas size.
 - Drag on empty canvas to create a box, drag inside a box to move it, and drag
   the dot at its bottom-right corner to resize it — the dot shows on hover or on
   the selected box. A box can also be typed as `x1, y1, x2, y2`.
+- When boxes overlap, the numbered badge at each box's top-left corner is the
+  reliable handle: it is drawn above every box, so click it to select that box
+  and drag from it to move that box. Clicking the same spot inside the overlap
+  again cycles through the boxes stacked there; if one of them is already
+  selected it stays selected on the first click, so dragging never switches the
+  target by accident.
 - Each box row carries its geometry twice: the pixel values `x1, y1, x2, y2` and,
   right below them, the same four edges as a percentage of the canvas. Both rows
   are editable — the canvas follows as you type, and every value is clamped to
