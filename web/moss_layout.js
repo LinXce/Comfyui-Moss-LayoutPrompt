@@ -91,11 +91,13 @@ const CSS = `
 .mlp-modal-head{display:flex;align-items:baseline;gap:10px;flex:0 0 auto}
 .mlp-modal-title{font-size:13px;font-weight:600;color:#e8ebef}
 .mlp-modal-sub{font-size:11px;color:#7d8694}
-.mlp-modal-note{font-size:11px;color:#7fbf8f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mlp-modal-note{flex:1 1 auto;min-width:0;font-size:11px;color:#7fbf8f;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.mlp-modal-note.is-error{color:#ff8a8a}
 .mlp-modal-body{flex:1 1 0;min-height:0;box-sizing:border-box;width:100%;resize:none;overflow:auto;
-  border:1px solid #343b47;border-radius:8px;background:#121519;color:#9fb4cc;padding:10px 12px;
+  border:1px solid #343b47;border-radius:8px;background:#121519;color:#c6d4e4;padding:10px 12px;
   font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word;
-  outline:none}
+  outline:none;caret-color:#4a9eff}
 .mlp-modal-body:focus{border-color:#4a9eff;box-shadow:0 0 0 2px rgba(74,158,255,.18)}
 .mlp-modal-body::-webkit-scrollbar{width:8px;height:8px}
 .mlp-modal-body::-webkit-scrollbar-thumb{background:#343b47;border-radius:4px}
@@ -803,11 +805,51 @@ function createEditor(node) {
     if (element instanceof HTMLTextAreaElement) element.focus({ preventScroll: true });
   }
 
+  function setDialogNote(note, message, isError) {
+    note.textContent = message;
+    note.classList.toggle("is-error", Boolean(isError));
+  }
+
+  // Apply the edited dialog text: load it onto the canvas and let the normal sync
+  // write the normalized draft back into `source`. Invalid text keeps the dialog
+  // open with an inline error, so nothing is lost or half-applied.
+  function applyDialogSource(dialog) {
+    if (!dialog) return;
+    const { body, note } = dialog;
+    const text = body.value;
+    if (!text.trim()) {
+      setDialogNote(note, "内容为空：请粘贴草稿 JSON、已编译提示词或旧版 scene 提示词", true);
+      return;
+    }
+    const widget = widgetByName(SOURCE_WIDGET);
+    if (widget && text === widget.value) {
+      closeSourceDialog();
+      return;
+    }
+    try {
+      if (!loadDraftText(text, null)) {
+        setDialogNote(note, "无法解析这段文本：需要草稿 JSON、已编译提示词或旧版 scene 提示词", true);
+        return;
+      }
+    } catch (error) {
+      setDialogNote(note, `无法载入：${error?.message ?? error}`, true);
+      return;
+    }
+    closeSourceDialog();
+    flash("已应用 source 内容并同步画布");
+  }
+
   function sourceDialogKeyDown(event) {
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
       closeSourceDialog();
+      return;
+    }
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      applyDialogSource(sourceDialog);
       return;
     }
     // Keep canvas shortcuts (Delete, Backspace, …) from firing behind the dialog.
@@ -844,19 +886,33 @@ function createEditor(node) {
     fallback();
   }
 
-  function showSourceDialog(text, hasBoxes) {
+  function showSourceDialog(text) {
     closeSourceDialog();
     const body = h("textarea", {
       class: "mlp-modal-body",
-      readonly: "readonly",
       spellcheck: "false",
-      "aria-label": "source 完整内容",
+      "aria-label": "source 内容",
     });
     body.value = text;
-    const copy = h("button", { type: "button", class: "mlp-btn mlp-btn-primary", text: "复制全文" });
-    copy.addEventListener("click", () => copySourceText(text, copy));
+    const count = h("span", { class: "mlp-modal-sub", text: `${text.length} 字符` });
+    body.addEventListener("input", () => {
+      count.textContent = `${body.value.length} 字符`;
+    });
+    const note = h("span", {
+      class: "mlp-modal-note",
+      text: "可直接编辑 · 点「应用」载入画布并与 source 同步 · Ctrl+Enter 应用",
+    });
+    const copy = h("button", { type: "button", class: "mlp-btn", text: "复制全文" });
+    copy.addEventListener("click", () => copySourceText(body.value, copy));
     const close = h("button", { type: "button", class: "mlp-btn", text: "关闭" });
     close.addEventListener("click", closeSourceDialog);
+    const apply = h("button", {
+      type: "button",
+      class: "mlp-btn mlp-btn-primary",
+      text: "应用",
+      title: "把这段内容载入画布，并同步回 source 输入框",
+    });
+    apply.addEventListener("click", () => applyDialogSource(sourceDialog));
     const modal = h("div", {
       class: "mlp-modal",
       role: "dialog",
@@ -866,20 +922,10 @@ function createEditor(node) {
       h("div", { class: "mlp-modal-head" }, [
         h("span", { class: "mlp-modal-title", text: "source · 完整内容" }),
         h("span", { class: "mlp-spacer" }),
-        h("span", { class: "mlp-modal-sub", text: `${text.length} 字符` }),
+        count,
       ]),
       body,
-      h("div", { class: "mlp-modal-foot" }, [
-        h("span", {
-          class: "mlp-modal-note",
-          text: hasBoxes
-            ? "source 与画布双向同步：画布改动会更新这里，这里的内容也会载入画布"
-            : "画布还没有框；在上方输入框或这里粘贴草稿即可载入画布",
-        }),
-        h("span", { class: "mlp-spacer" }),
-        copy,
-        close,
-      ]),
+      h("div", { class: "mlp-modal-foot" }, [note, copy, close, apply]),
     ]);
     const backdrop = h("div", {
       class: "mlp-modal-backdrop",
@@ -889,21 +935,21 @@ function createEditor(node) {
     }, [modal]);
     document.body.append(backdrop);
     document.addEventListener("keydown", sourceDialogKeyDown, true);
-    sourceDialog = { backdrop };
+    sourceDialog = { backdrop, body, note };
     body.focus({ preventScroll: true });
     body.setSelectionRange?.(0, 0);
   }
 
-  // The source tab is a button that opens the full text (the strip itself only
-  // shows two lines). `source` is mirrored from the canvas, so the dialog always
-  // shows the current draft rather than an outdated paste.
+  // The source tab opens the full text in an editable dialog (the strip itself
+  // only shows two lines). Applying it loads the canvas; the sync then writes the
+  // normalized draft back, so the dialog and the mini field always agree.
   function openSourceDialog() {
     const widget = widgetByName(SOURCE_WIDGET);
     if (!widget) return;
     window.clearTimeout(sourceTimer);
     mirrorSource();
     const text = typeof widget.value === "string" ? widget.value : "";
-    showSourceDialog(text, state.items.length > 0);
+    showSourceDialog(text);
   }
 
   function watchWidgets() {

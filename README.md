@@ -50,10 +50,11 @@ input: `source` takes a draft JSON, a compiled prompt or a legacy scene prompt a
 loads it onto the canvas. `source` and the canvas are kept in sync both ways:
 editing or pasting into `source` loads it onto the canvas, and every edit on the
 canvas writes the current draft back into `source`. The field is framed like an
-input, and its `source` tab is a button that opens the complete text in a dialog
-(the strip itself only shows two lines).
+input, and its `source` tab is a button that opens the complete text in an editable
+dialog (the strip itself only shows two lines); fix the JSON there and press
+**应用** to load it onto the canvas and sync it back into `source`.
 
-![The source dialog: the complete source text in a large read-only box with copy and close actions, and a note that source and canvas are synced both ways.](assets/source-dialog.png)
+![The source dialog: the complete source text in a large editable box with copy, close and apply actions, and a note that source and canvas are synced both ways.](assets/source-dialog.png)
 
 | Input | |
 | --- | --- |

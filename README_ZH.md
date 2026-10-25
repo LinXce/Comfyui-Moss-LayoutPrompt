@@ -41,9 +41,10 @@ MOSS-Image 的 JSON Layout 提示词画布编辑器。在画布上为每个元�
 节点 ID `MOSSImageLayoutPromptAdvance`。原节点再加上外部草稿输入：`source` 接受草稿
 JSON、已编译提示词或旧版 scene 提示词，并载入画布。`source` 与画布双向同步：在
 `source` 里输入/粘贴会载入画布，画布上的任何修改也会把当前草稿写回 `source`。输入框带
-`source` 标签条，标签条是按钮，点击会在弹窗里显示完整内容（输入框本身只显示两行）。
+`source` 标签条，标签条是按钮，点击会在弹窗里显示**可编辑**的完整内容（输入框本身只显示
+两行）；在弹窗里改好后点「应用」即可载入画布并同步回 `source`。
 
-![source 弹窗：完整内容显示在大号只读输入框中，可复制或关闭，并提示 source 与画布双向同步。](assets/source-dialog.png)
+![source 弹窗：完整内容显示在大号可编辑输入框中，可复制、关闭或应用，并提示 source 与画布双向同步。](assets/source-dialog.png)
 
 | 输入 | |
 | --- | --- |
