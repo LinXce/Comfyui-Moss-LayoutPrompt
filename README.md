@@ -10,7 +10,7 @@ The plugin ships two nodes: **MOSS Layout Prompt**, the stable editor, and
 **MOSS Layout Prompt (Advance)** — **experimental** — which adds an external
 draft input on top of it.
 
-![The MOSS Layout Prompt node: a canvas with two boxes on the left, and on the right the meta tags, one editable row per box, and a read-only preview of the compiled prompt.](assets/editor.png)
+![The MOSS Layout Prompt node: on the left a canvas where each box carries a numbered tab with its caption, and on the right the meta tags, one editable row per box, and a read-only preview of the compiled prompt.](assets/editor.png)
 
 ## Installation
 
@@ -47,12 +47,18 @@ editor and outputs.
 
 Node id `MOSSImageLayoutPromptAdvance`. The original node plus the external draft
 input: `source` takes a draft JSON, a compiled prompt or a legacy scene prompt and
-loads it onto the canvas.
+loads it onto the canvas. `source` and the canvas are kept in sync both ways:
+editing or pasting into `source` loads it onto the canvas, and every edit on the
+canvas writes the current draft back into `source`. The field is framed like an
+input, and its `source` tab is a button that opens the complete text in a dialog
+(the strip itself only shows two lines).
+
+![The source dialog: the complete source text in a large read-only box with copy and close actions, and a note that source and canvas are synced both ways.](assets/source-dialog.png)
 
 | Input | |
 | --- | --- |
 | `width`, `height` | Canvas and image size, positive multiples of 16. |
-| `source` | **Experimental.** External draft text. Paste a draft JSON here — wrapped in unrelated prose, or already compiled as `abs_centralized`/`yxyx` — and it is loaded onto the canvas. Without the editor it is compiled directly, but only when the canvas has no boxes. |
+| `source` | **Experimental.** External draft text. Paste a draft JSON here — wrapped in unrelated prose, or already compiled as `abs_centralized`/`yxyx` — and it is loaded onto the canvas; the canvas mirrors its edits back into this field as the current draft. Without the editor it is compiled directly, but only when the canvas has no boxes. |
 | `layout` | Draft JSON. Hidden by the editor; hand-edit it when the canvas UI is unavailable. |
 
 ### MOSS Layout Prompt — stable
@@ -73,12 +79,14 @@ canvas size.
 - Drag on empty canvas to create a box, drag inside a box to move it, and drag
   the dot at its bottom-right corner to resize it — the dot shows on hover or on
   the selected box. A box can also be typed as `x1, y1, x2, y2`.
-- When boxes overlap, the numbered badge at each box's top-left corner is the
-  reliable handle: it is drawn above every box, so click it to select that box
-  and drag from it to move that box. Clicking the same spot inside the overlap
-  again cycles through the boxes stacked there; if one of them is already
-  selected it stays selected on the first click, so dragging never switches the
-  target by accident.
+- When boxes overlap, the numbered tab at every box's top-left corner is the
+  reliable handle: the number, then as much of the box's caption (or its exact
+  text, for text boxes) as its width allows, then a four-way move glyph. The tab
+  is drawn above every box and the whole tab is clickable, so click it to select
+  that box and drag from it to move that box. Clicking the same spot
+  inside the overlap again cycles through the boxes stacked there; if one of them
+  is already selected it stays selected on the first click, so dragging never
+  switches the target by accident.
 - Each box row carries its geometry twice: the pixel values `x1, y1, x2, y2` and,
   right below them, the same four edges as a percentage of the canvas. Both rows
   are editable — the canvas follows as you type, and every value is clamped to
@@ -93,7 +101,10 @@ canvas size.
 - `meta` tags are chips: type and press Enter or comma to add one, click a chip
   to edit it in place, and click anywhere outside the chip (or press Enter) to
   finish. `Esc` cancels the edit; `×` removes the tag.
-- `添加框` adds a box, `✕` deletes one, `清空` clears the canvas.
+- `添加框` adds a box, `✕` deletes one, `清空` clears the canvas. With a box
+  selected, `Delete` and `Backspace` delete that box too — text fields keep their
+  normal editing keys, and the node itself is never removed by these keys while
+  the editor has focus.
 - `全部清空` (red, Advance node only) clears **everything**: every box, the summary
   prompt, the `meta` tags and the `source` input. The canvas size is kept.
 - `从文件导入` loads a draft JSON file and puts it on the canvas. The file may
@@ -136,9 +147,14 @@ compiled `abs_centralized`/`yxyx` prompt is decoded back with the node's
 directly, but only when the canvas holds no boxes.
 
 Editing or pasting into `source` always re-applies it — even when the text ends
-up unchanged — so it can replace the canvas at any time. Reloading the page or
-running the workflow never re-applies it: once the canvas holds boxes, its draft
-wins.
+up unchanged — so it can replace the canvas at any time. In the other direction,
+the editor mirrors every canvas change back into `source` as the current draft;
+while you are typing in the field it is left untouched, and it is normalized into a
+draft as soon as you leave it. The stored text is therefore always a valid draft:
+an older paste, a compiled prompt or a legacy scene prompt is converted before it
+is written back, so running the node can never prefer stale source text over the
+boxes on screen. Reloading the page or running the workflow never re-applies it:
+once the canvas holds boxes, its draft wins.
 
 The vocabulary, coordinate system and composition rules are documented in the
 MOSS-Image repository:

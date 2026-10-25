@@ -14,15 +14,33 @@ const PALETTE = ["#4a9eff", "#ff9147", "#59d97f", "#ff6b8b", "#c084fc", "#facc15
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 const MIN_BOX = 8;
 const SNAP_STEP = 8;
-const BADGE_RADIUS = 8;
-const BADGE_OFFSET = 10;
-const BADGE_SLACK = 4;
+// The number + caption tab at every box's top-left. Sizes are CSS pixels, so the
+// tab keeps the same readable size at any zoom, while its width follows the box:
+// a narrow box simply shows fewer characters.
+const HEADER_HEIGHT = 18;
+const HEADER_RADIUS = 4;
+const HEADER_PAD = 5;
+const HEADER_GAP = 4;
+const HEADER_INSET = 1;
+const HEADER_MAX_WIDTH = 320;
+const HEADER_MIN_TEXT = 16;
+const HEADER_MIN_WIDTH = 20;
+const HEADER_HIT_SLACK = 3;
+const HANDLE_SIZE = 18;
+const HEADER_FONT = 'bold 11px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
+const HEADER_TEXT_FONT = '10px ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif';
 const CYCLE_SLACK = 4;
 const MIN_SIZE = 16;
 const EDITOR_MIN_HEIGHT = 420;
 const MIN_NODE_WIDTH = 980;
 const MIN_NODE_HEIGHT = 680;
-const SOURCE_WIDGET_HEIGHT = 26;
+const SOURCE_WIDGET_HEIGHT = 42;
+const SOURCE_TAG_HEIGHT = 20;
+const SOURCE_PAD_LEFT = 78;
+const SOURCE_PAD_RIGHT = 166;
+const SOURCE_PLACEHOLDER = "点击输入，或在此粘贴草稿 JSON / 旧版 scene 提示词（可夹杂无关文字）";
+const SOURCE_HINT_TEXT = "点击输入 / 粘贴草稿 JSON";
+const SOURCE_TAG_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 11V3h-8l3.29 3.29-4.3 4.3 1.41 1.41 4.3-4.3L21 11zM3 13v8h8l-3.29-3.29 4.3-4.3-1.41-1.41-4.3 4.3L3 13z"/></svg>';
 const SOURCE_DEBOUNCE = 400;
 const SOURCE_POLL = 600;
 const SIDE_WIDTH = 360;
@@ -35,6 +53,53 @@ const CSS = `
 .mlp-stage{position:relative;flex:1 1 0;min-width:200px;height:100%;border-radius:8px;
   border:1px solid #2c313a;background:#14171d;overflow:hidden}
 .mlp-canvas{display:block;width:100%;height:100%;touch-action:none}
+.mlp-canvas:focus{outline:none}
+/* The Advance node's external draft field: a framed input with a "source" tab and
+   a persistent click/paste hint, so it reads as an input instead of plain text. */
+.mlp-source-wrap textarea.comfy-multiline-input{box-sizing:border-box!important;width:100%!important;
+  height:${SOURCE_WIDGET_HEIGHT}px!important;min-height:${SOURCE_WIDGET_HEIGHT}px!important;
+  max-height:${SOURCE_WIDGET_HEIGHT}px!important;resize:none!important;outline:none!important;
+  padding:4px ${SOURCE_PAD_RIGHT}px 4px ${SOURCE_PAD_LEFT}px!important;
+  border:1px solid #343b47!important;border-radius:6px!important;background:#121519!important;
+  color:#dbe4ef!important;font:11px/16px ui-monospace,SFMono-Regular,Menlo,monospace!important;
+  white-space:pre-wrap!important;overflow-x:hidden!important;overflow-y:auto!important;
+  scrollbar-width:none!important}
+.mlp-source-wrap textarea.comfy-multiline-input::-webkit-scrollbar{width:0;height:0}
+.mlp-source-wrap textarea.comfy-multiline-input::placeholder{color:#68707d!important;opacity:1}
+.mlp-source-wrap textarea.comfy-multiline-input:focus{border-color:#4a9eff!important;
+  box-shadow:0 0 0 2px rgba(74,158,255,.18)!important}
+.mlp-source-tag{position:absolute;left:3px;top:${(SOURCE_WIDGET_HEIGHT - SOURCE_TAG_HEIGHT) / 2}px;
+  height:${SOURCE_TAG_HEIGHT}px;display:inline-flex;align-items:center;gap:4px;padding:0 8px;
+  border:0;border-radius:4px;background:#4a9eff;color:#f4f7fb;white-space:nowrap;cursor:pointer;z-index:2;
+  font:600 10px/1 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.02em;
+  transition:background .12s,box-shadow .12s}
+.mlp-source-tag:hover{background:#5da9ff}
+.mlp-source-tag:active{background:#3b8de8}
+.mlp-source-tag:focus-visible{outline:2px solid rgba(255,255,255,.85);outline-offset:1px}
+.mlp-source-tag svg{display:block;width:10px;height:10px;fill:currentColor}
+.mlp-source-hint{position:absolute;right:8px;top:${(SOURCE_WIDGET_HEIGHT - SOURCE_TAG_HEIGHT) / 2}px;
+  height:${SOURCE_TAG_HEIGHT}px;display:inline-flex;align-items:center;padding:0 7px;border-radius:4px;
+  background:#121519;color:#7d8694;white-space:nowrap;pointer-events:none;z-index:2;
+  font:10px/1 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+/* Full-content dialog opened from the source tab. */
+.mlp-modal-backdrop{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;
+  justify-content:center;padding:24px;background:rgba(6,8,11,.64);backdrop-filter:blur(2px)}
+.mlp-modal{display:flex;flex-direction:column;gap:10px;width:min(780px,92vw);height:min(72vh,660px);
+  box-sizing:border-box;padding:16px 18px;border-radius:12px;border:1px solid #39414d;background:#1b1f26;
+  box-shadow:0 26px 70px rgba(0,0,0,.6);color:#d7dae0;
+  font:12px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+.mlp-modal-head{display:flex;align-items:baseline;gap:10px;flex:0 0 auto}
+.mlp-modal-title{font-size:13px;font-weight:600;color:#e8ebef}
+.mlp-modal-sub{font-size:11px;color:#7d8694}
+.mlp-modal-note{font-size:11px;color:#7fbf8f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mlp-modal-body{flex:1 1 0;min-height:0;box-sizing:border-box;width:100%;resize:none;overflow:auto;
+  border:1px solid #343b47;border-radius:8px;background:#121519;color:#9fb4cc;padding:10px 12px;
+  font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;word-break:break-word;
+  outline:none}
+.mlp-modal-body:focus{border-color:#4a9eff;box-shadow:0 0 0 2px rgba(74,158,255,.18)}
+.mlp-modal-body::-webkit-scrollbar{width:8px;height:8px}
+.mlp-modal-body::-webkit-scrollbar-thumb{background:#343b47;border-radius:4px}
+.mlp-modal-foot{display:flex;align-items:center;gap:8px;flex:0 0 auto}
 .mlp-side{flex:0 0 ${SIDE_WIDTH}px;display:flex;flex-direction:column;gap:6px;height:100%;
   min-height:0;box-sizing:border-box}
 .mlp-list{position:relative;flex:3 1 0;min-height:0;display:flex;flex-direction:column;gap:6px;
@@ -145,6 +210,14 @@ function h(tag, attrs, children) {
 
 function field(label, control) {
   return h("div", null, [h("span", { class: "mlp-label", text: label }), control]);
+}
+
+// Keys typed into one of these elements belong to that field, not to the canvas
+// shortcuts (typing, deleting characters, chip editing, colour pickers).
+function isEditableElement(element) {
+  if (!(element instanceof Element)) return false;
+  const tag = element.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || element.isContentEditable;
 }
 
 function textarea(value, placeholder, onInput) {
@@ -510,6 +583,70 @@ function colorOf(item) {
   return item.color || LABEL_COLORS[item.label] || FALLBACK_COLOR;
 }
 
+// Text sits on the item's own color, so pick white or near-black by luminance.
+function textOn(hex) {
+  const value = parseInt(hex.slice(1), 16);
+  const red = (value >> 16) & 255;
+  const green = (value >> 8) & 255;
+  const blue = value & 255;
+  return (red * 0.299 + green * 0.587 + blue * 0.114) / 255 > 0.62 ? "#101318" : "#f4f7fb";
+}
+
+// The one-line summary drawn on the header: the exact text for text boxes,
+// otherwise the caption. Whitespace is folded so a multiline caption still reads
+// as a single tab label.
+function itemText(item) {
+  const raw = item.label === "text" && item.text ? item.text : item.caption;
+  return typeof raw === "string" ? raw.replace(/\s+/g, " ").trim() : "";
+}
+
+function roundedRect(context, x, y, width, height, radius) {
+  const size = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + size, y);
+  context.arcTo(x + width, y, x + width, y + height, size);
+  context.arcTo(x + width, y + height, x, y + height, size);
+  context.arcTo(x, y + height, x, y, size);
+  context.arcTo(x, y, x + width, y, size);
+  context.closePath();
+}
+
+// A four-way move glyph, drawn by hand so it matches the tab at any zoom.
+function drawMoveGlyph(context, centerX, centerY, size, ink) {
+  const arm = Math.max(3.5, size * 0.26);
+  const head = Math.max(2.2, arm * 0.6);
+  context.save();
+  context.strokeStyle = ink;
+  context.fillStyle = ink;
+  context.lineWidth = 1.4;
+  context.lineCap = "round";
+  context.beginPath();
+  context.moveTo(centerX - arm + head * 0.3, centerY);
+  context.lineTo(centerX + arm - head * 0.3, centerY);
+  context.moveTo(centerX, centerY - arm + head * 0.3);
+  context.lineTo(centerX, centerY + arm - head * 0.3);
+  context.stroke();
+  context.beginPath();
+  context.moveTo(centerX, centerY - arm - head);
+  context.lineTo(centerX - head, centerY - arm + head * 0.45);
+  context.lineTo(centerX + head, centerY - arm + head * 0.45);
+  context.closePath();
+  context.moveTo(centerX, centerY + arm + head);
+  context.lineTo(centerX - head, centerY + arm - head * 0.45);
+  context.lineTo(centerX + head, centerY + arm - head * 0.45);
+  context.closePath();
+  context.moveTo(centerX - arm - head, centerY);
+  context.lineTo(centerX - arm + head * 0.45, centerY - head);
+  context.lineTo(centerX - arm + head * 0.45, centerY + head);
+  context.closePath();
+  context.moveTo(centerX + arm + head, centerY);
+  context.lineTo(centerX + arm - head * 0.45, centerY - head);
+  context.lineTo(centerX + arm - head * 0.45, centerY + head);
+  context.closePath();
+  context.fill();
+  context.restore();
+}
+
 function createEditor(node) {
   const layoutWidget = node.widgets?.find((widget) => widget.name === LAYOUT_WIDGET);
   if (!layoutWidget) return null;
@@ -529,6 +666,7 @@ function createEditor(node) {
   let sourceTimer = 0;
   let lastSourceText = "";
   let styledSource = null;
+  let sourceDialog = null;
 
   function queueSource(force) {
     window.clearTimeout(sourceTimer);
@@ -542,13 +680,230 @@ function createEditor(node) {
 
   function applySource(force) {
     const text = sourceText();
-    if (!text) return;
-    if (!force && text === lastSourceText) return;
+    if (!text) return false;
+    if (!force && text === lastSourceText) return false;
     try {
-      if (loadDraftText(text, null)) lastSourceText = text;
+      if (loadDraftText(text, null)) {
+        lastSourceText = text;
+        return true;
+      }
     } catch (error) {
       console.error("[moss-layoutPrompt] failed to load the source draft", error);
     }
+    return false;
+  }
+
+  function sourceElement() {
+    const element = widgetByName(SOURCE_WIDGET)?.element;
+    return element instanceof HTMLTextAreaElement ? element : null;
+  }
+
+  function sourceIsFocused() {
+    return document.activeElement === sourceElement();
+  }
+
+  // Write the canvas draft back into the external `source` widget without firing
+  // input events (a programmatic write must not look like the user pasted it).
+  function writeSource(text) {
+    const widget = widgetByName(SOURCE_WIDGET);
+    if (!widget) return;
+    if (widget.value !== text) widget.value = text;
+    const element = sourceElement();
+    if (element) {
+      if (element.value !== text) element.value = text;
+      decorateSource(element);
+    }
+    lastSourceText = text;
+  }
+
+  // Keep `source` and the canvas in step. The canvas is the source of truth: every
+  // edit mirrors the current draft into `source`, so running the node can never
+  // prefer an older draft (or a compiled prompt the backend rejects) over the
+  // boxes on screen. While the user types in `source` the field is left alone —
+  // the blur handler normalizes it afterwards.
+  function mirrorSource(draftJson) {
+    const widget = widgetByName(SOURCE_WIDGET);
+    if (!widget || sourceIsFocused()) return;
+    if (!state.items.length && !sourceText()) return; // pristine canvas: keep the placeholder
+    writeSource(draftJson ?? JSON.stringify(buildDraft()));
+  }
+
+  // Safety net for focus changes that never reach our blur handler (programmatic
+  // blur, older frontends). Only folds text that is already applied (or empty), so
+  // it can never eat what the user is still typing.
+  function normalizeSource() {
+    const widget = widgetByName(SOURCE_WIDGET);
+    if (!widget || sourceIsFocused()) return;
+    const text = sourceText();
+    if (text && text !== lastSourceText) return;
+    if (!state.items.length && !text) return;
+    const target = JSON.stringify(buildDraft());
+    if (typeof widget.value !== "string" || widget.value !== target) writeSource(target);
+  }
+
+  // The source field is a plain multiline widget, so on its own it reads as a block
+  // of dim body text instead of an input. Frame it like one: a "source" tab on the
+  // left, a persistent click/paste hint on the right and a real placeholder. Both
+  // decorations live in the widget's DOM wrapper, above the textarea, so clicking
+  // anywhere still focuses the textarea.
+  function decorateSource(element) {
+    const wrap = element.parentElement;
+    if (!wrap) return;
+    if (!wrap.classList.contains("mlp-source-wrap")) {
+      wrap.classList.add("mlp-source-wrap");
+      // The tab and hint are absolutely positioned; older frontends may not give
+      // the widget wrapper a positioning context of its own.
+      if (getComputedStyle(wrap).position === "static") wrap.style.position = "relative";
+    }
+    if (element.placeholder !== SOURCE_PLACEHOLDER) element.placeholder = SOURCE_PLACEHOLDER;
+    if (!wrap.querySelector(".mlp-source-tag")) {
+      const tag = document.createElement("button");
+      tag.type = "button";
+      tag.className = "mlp-source-tag";
+      tag.title = "打开 source 完整内容（与画布双向同步）";
+      tag.innerHTML = SOURCE_TAG_ICON;
+      const label = document.createElement("span");
+      label.textContent = "source";
+      tag.append(label);
+      tag.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openSourceDialog();
+      });
+      wrap.append(tag);
+    }
+    if (!wrap.querySelector(".mlp-source-hint")) {
+      const hint = document.createElement("span");
+      hint.className = "mlp-source-hint";
+      hint.textContent = SOURCE_HINT_TEXT;
+      wrap.append(hint);
+    }
+    // With content the placeholder is gone, so the right-hand hint is what keeps
+    // saying "you can edit/paste here"; when the field is empty the placeholder
+    // already does that job and the hint would just repeat it.
+    wrap.querySelector(".mlp-source-hint").style.display =
+      element.value.trim() === "" ? "none" : "inline-flex";
+  }
+
+  function styleSource(element) {
+    element.rows = 1;
+    element.style.height = `${SOURCE_WIDGET_HEIGHT}px`;
+    element.style.minHeight = `${SOURCE_WIDGET_HEIGHT}px`;
+    element.style.maxHeight = `${SOURCE_WIDGET_HEIGHT}px`;
+    decorateSource(element);
+  }
+
+  function closeSourceDialog() {
+    if (!sourceDialog) return;
+    const { backdrop } = sourceDialog;
+    sourceDialog = null;
+    backdrop.remove();
+    document.removeEventListener("keydown", sourceDialogKeyDown, true);
+    const element = widgetByName(SOURCE_WIDGET)?.element;
+    if (element instanceof HTMLTextAreaElement) element.focus({ preventScroll: true });
+  }
+
+  function sourceDialogKeyDown(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeSourceDialog();
+      return;
+    }
+    // Keep canvas shortcuts (Delete, Backspace, …) from firing behind the dialog.
+    event.stopPropagation();
+  }
+
+  function copySourceText(text, button) {
+    const done = () => {
+      button.textContent = "已复制";
+      window.setTimeout(() => {
+        button.textContent = "复制全文";
+      }, 1500);
+    };
+    const fallback = () => {
+      const area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.top = "-1000px";
+      area.style.opacity = "0";
+      document.body.append(area);
+      area.select();
+      try {
+        document.execCommand("copy");
+        done();
+      } catch (error) {
+        button.textContent = "复制失败";
+      }
+      area.remove();
+    };
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+      return;
+    }
+    fallback();
+  }
+
+  function showSourceDialog(text, hasBoxes) {
+    closeSourceDialog();
+    const body = h("textarea", {
+      class: "mlp-modal-body",
+      readonly: "readonly",
+      spellcheck: "false",
+      "aria-label": "source 完整内容",
+    });
+    body.value = text;
+    const copy = h("button", { type: "button", class: "mlp-btn mlp-btn-primary", text: "复制全文" });
+    copy.addEventListener("click", () => copySourceText(text, copy));
+    const close = h("button", { type: "button", class: "mlp-btn", text: "关闭" });
+    close.addEventListener("click", closeSourceDialog);
+    const modal = h("div", {
+      class: "mlp-modal",
+      role: "dialog",
+      "aria-modal": "true",
+      "aria-label": "source 完整内容",
+    }, [
+      h("div", { class: "mlp-modal-head" }, [
+        h("span", { class: "mlp-modal-title", text: "source · 完整内容" }),
+        h("span", { class: "mlp-spacer" }),
+        h("span", { class: "mlp-modal-sub", text: `${text.length} 字符` }),
+      ]),
+      body,
+      h("div", { class: "mlp-modal-foot" }, [
+        h("span", {
+          class: "mlp-modal-note",
+          text: hasBoxes
+            ? "source 与画布双向同步：画布改动会更新这里，这里的内容也会载入画布"
+            : "画布还没有框；在上方输入框或这里粘贴草稿即可载入画布",
+        }),
+        h("span", { class: "mlp-spacer" }),
+        copy,
+        close,
+      ]),
+    ]);
+    const backdrop = h("div", {
+      class: "mlp-modal-backdrop",
+      onpointerdown: (event) => {
+        if (event.target === backdrop) closeSourceDialog();
+      },
+    }, [modal]);
+    document.body.append(backdrop);
+    document.addEventListener("keydown", sourceDialogKeyDown, true);
+    sourceDialog = { backdrop };
+    body.focus({ preventScroll: true });
+    body.setSelectionRange?.(0, 0);
+  }
+
+  // The source tab is a button that opens the full text (the strip itself only
+  // shows two lines). `source` is mirrored from the canvas, so the dialog always
+  // shows the current draft rather than an outdated paste.
+  function openSourceDialog() {
+    const widget = widgetByName(SOURCE_WIDGET);
+    if (!widget) return;
+    window.clearTimeout(sourceTimer);
+    mirrorSource();
+    const text = typeof widget.value === "string" ? widget.value : "";
+    showSourceDialog(text, state.items.length > 0);
   }
 
   function watchWidgets() {
@@ -569,22 +924,42 @@ function createEditor(node) {
       };
     }
     const element = widget.element;
-    if (element instanceof HTMLTextAreaElement && element !== styledSource) {
-      styledSource = element;
-      element.rows = 1;
-      element.style.height = `${SOURCE_WIDGET_HEIGHT}px`;
-      element.style.minHeight = `${SOURCE_WIDGET_HEIGHT}px`;
-      element.style.maxHeight = `${SOURCE_WIDGET_HEIGHT}px`;
-      element.addEventListener("input", () => queueSource(true));
+    if (element instanceof HTMLTextAreaElement) {
+      if (element !== styledSource) {
+        styledSource = element;
+        element.addEventListener("input", () => {
+          decorateSource(element);
+          queueSource(true);
+        });
+        // Leaving the field hands the canvas back the last word: apply whatever
+        // was typed, then store the normalized draft so `source` stays a valid
+        // draft the node can compile.
+        element.addEventListener("blur", () => {
+          window.clearTimeout(sourceTimer);
+          const text = sourceText();
+          if (text && text !== lastSourceText && !applySource(true)) return;
+          normalizeSource();
+        });
+      }
+      if (!sourceIsFocused() && typeof widget.value === "string" && element.value !== widget.value) {
+        // A lazily created DOM field must show the synced widget value.
+        element.value = widget.value;
+      }
+      styleSource(element);
     }
     applySource();
+    normalizeSource();
   }
 
   function clearSource() {
     const widget = node.widgets?.find((entry) => entry.name === SOURCE_WIDGET);
     if (!widget) return;
     widget.value = "";
-    if (widget.element instanceof HTMLTextAreaElement) widget.element.value = "";
+    const element = widget.element;
+    if (element instanceof HTMLTextAreaElement) {
+      element.value = "";
+      decorateSource(element);
+    }
     lastSourceText = "";
   }
 
@@ -596,9 +971,11 @@ function createEditor(node) {
     hover = -1;
     overlap = 0;
     resetCycle();
-    clearSource();
     render();
+    // Sync first so the layout draft is empty, then clear `source` for real: a
+    // pristine canvas must not leave a stale draft behind.
     sync();
+    clearSource();
     draw();
   }
 
@@ -633,7 +1010,7 @@ function createEditor(node) {
     cycle.index = 0;
   }
 
-  const canvas = h("canvas", { class: "mlp-canvas" });
+  const canvas = h("canvas", { class: "mlp-canvas", tabindex: "0" });
   const context = canvas.getContext("2d");
   const overlapChip = h("div", { class: "mlp-chip-hint" });
   const stage = h("div", { class: "mlp-stage" }, [canvas, overlapChip]);
@@ -668,6 +1045,38 @@ function createEditor(node) {
     },
   });
   root.append(fileInput);
+
+  function focusCanvas() {
+    if (document.activeElement !== canvas) canvas.focus({ preventScroll: true });
+  }
+
+  // Backspace and Delete remove the selected box, never the node. The frontend
+  // binds both keys to "delete selected items" on window, so while the editor
+  // owns the keyboard we swallow them here: the box disappears, the node stays.
+  // Text fields keep their normal editing keys.
+  function onEditorKeyDown(event) {
+    if (event.defaultPrevented) return;
+    if (event.key !== "Backspace" && event.key !== "Delete") return;
+    if (event.ctrlKey || event.metaKey || event.altKey) return;
+    if (isEditableElement(event.target)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (drag) return;
+    if (selection < 0) {
+      flash("先点击一个框，再按 Delete 或退格删除它");
+      return;
+    }
+    removeItem(selection);
+  }
+
+  root.addEventListener("keydown", onEditorKeyDown);
+
+  // Clicking anywhere that is not a text field focuses the canvas, so the delete
+  // keys work right after selecting a box from the side list or the canvas.
+  root.addEventListener("pointerdown", (event) => {
+    if (isEditableElement(event.target)) return;
+    focusCanvas();
+  }, true);
 
   node.addDOMWidget("layout_editor", "layout", root, {
     serialize: false,
@@ -824,8 +1233,7 @@ function createEditor(node) {
     };
   }
 
-  function compiledPrompt() {
-    const draft = buildDraft();
+  function compiledPrompt(draft = buildDraft()) {
     if (!draft.items.length) return draft.summary.caption.trim();
     const halfWidth = Math.floor(draft.width / 2);
     const halfHeight = Math.floor(draft.height / 2);
@@ -853,9 +1261,12 @@ function createEditor(node) {
 
   function sync() {
     hideLayoutWidget();
+    const draft = buildDraft();
+    const draftJson = JSON.stringify(draft);
     const widget = widgetByName(LAYOUT_WIDGET);
-    if (widget) widget.value = JSON.stringify(buildDraft());
-    previewBody.value = compiledPrompt();
+    if (widget) widget.value = draftJson;
+    previewBody.value = compiledPrompt(draft);
+    mirrorSource(draftJson);
   }
 
   function load() {
@@ -1051,17 +1462,9 @@ function createEditor(node) {
       h("button", {
         type: "button",
         class: "mlp-btn mlp-btn-icon",
-        title: "删除此框",
+        title: "删除此框（也可按 Delete / 退格）",
         text: "✕",
-        onclick: () => {
-          state.items.splice(index, 1);
-          selection = -1;
-          overlap = 0;
-          resetCycle();
-          render();
-          sync();
-          draw();
-        },
+        onclick: () => removeItem(index),
       }),
     ]);
 
@@ -1180,7 +1583,7 @@ function createEditor(node) {
       ...rows,
       h("div", {
         class: "mlp-hint",
-        text: "空白处拖动新建框 · 拖左上角数字标移动该框（重叠时最可靠）· 重叠处重复点击切换 · 悬停后拖右下角圆点缩放 · 右侧可手输像素或百分比微调",
+        text: "空白处拖动新建框 · 左上角编号条显示编号与文字，条越宽可见文字越多 · 拖编号条移动该框（重叠时最可靠）· 选中后按 Delete / 退格删除该框（输入框内仍是正常编辑）· 重叠处重复点击切换 · 悬停后拖右下角圆点缩放 · 右侧可手输像素或百分比微调",
       }),
     );
     list.querySelectorAll(".mlp-textarea").forEach(autosize);
@@ -1198,6 +1601,20 @@ function createEditor(node) {
     cards[selection]?.element.querySelector("textarea")?.focus();
   }
 
+  function removeItem(index) {
+    if (index < 0 || index >= state.items.length) return;
+    const number = index + 1;
+    state.items.splice(index, 1);
+    selection = -1;
+    hover = -1;
+    overlap = 0;
+    resetCycle();
+    render();
+    sync();
+    draw();
+    flash(`已删除框 #${number}`);
+  }
+
   function drawItem(item, index, scale) {
     const [x1, y1, x2, y2] = item.bbox;
     const left = view.x + x1 * scale;
@@ -1212,32 +1629,52 @@ function createEditor(node) {
     context.lineWidth = active ? 2 : 1;
     context.strokeStyle = color;
     context.strokeRect(left + 0.5, top + 0.5, width - 1, height - 1);
-
-    const label = item.label === "text" && item.text ? item.text : item.caption;
-    if (label && width > 46 && height > 30) {
-      context.save();
-      context.beginPath();
-      context.rect(left, top, width, height);
-      context.clip();
-      context.fillStyle = "rgba(235, 240, 246, 0.85)";
-      context.font = "11px ui-sans-serif, system-ui, sans-serif";
-      context.textAlign = "left";
-      context.textBaseline = "top";
-      context.fillText(truncate(context, label.split("\n")[0], width - 12), left + 6, top + 20);
-      context.restore();
-    }
   }
 
-  function badgeVisible(item) {
+  // Lay out the top-left tab in CSS pixels: number, then as much caption text as
+  // the box width allows, then the move handle when there is still room. The tab
+  // never leaves the box, and the whole union is the pointer target.
+  function headerMetrics(item, index) {
+    const scale = view.scale || 1;
     const [x1, y1, x2, y2] = item.bbox;
-    return (x2 - x1) * view.scale > MIN_SIZE && (y2 - y1) * view.scale > MIN_SIZE;
-  }
+    const boxWidth = (x2 - x1) * scale;
+    const boxHeight = (y2 - y1) * scale;
+    if (boxWidth < HEADER_MIN_WIDTH || boxHeight < HEADER_HEIGHT + HEADER_INSET) return null;
+    const left = view.x + x1 * scale + HEADER_INSET;
+    const top = view.y + y1 * scale + HEADER_INSET;
+    const available = Math.min(boxWidth - HEADER_INSET * 2, HEADER_MAX_WIDTH);
+    if (available < HEADER_HEIGHT) return null;
 
-  function badgeCenter(item) {
-    return {
-      x: view.x + item.bbox[0] * view.scale + BADGE_OFFSET,
-      y: view.y + item.bbox[1] * view.scale + BADGE_OFFSET,
+    const number = String(index + 1);
+    context.font = HEADER_FONT;
+    const numberWidth = Math.ceil(context.measureText(number).width);
+    const textStart = HEADER_PAD + numberWidth + HEADER_PAD;
+    const handleFits = available >= textStart + HEADER_GAP + HANDLE_SIZE;
+    const handleWidth = handleFits ? HANDLE_SIZE : 0;
+    const gap = handleFits ? HEADER_GAP : 0;
+    const pillCap = Math.max(textStart, available - handleWidth - gap);
+    const textArea = pillCap - textStart - HEADER_PAD;
+
+    let text = "";
+    let pillWidth = textStart;
+    const label = itemText(item);
+    if (label && textArea >= HEADER_MIN_TEXT) {
+      context.font = HEADER_TEXT_FONT;
+      text = truncate(context, label, textArea);
+      pillWidth = Math.min(pillCap, textStart + Math.ceil(context.measureText(text).width) + HEADER_PAD);
+    }
+
+    const pill = { x: left, y: top, width: pillWidth, height: HEADER_HEIGHT };
+    const handle = handleFits
+      ? { x: left + pillWidth + gap, y: top, width: handleWidth, height: HEADER_HEIGHT }
+      : null;
+    const hit = {
+      x: left,
+      y: top,
+      width: pillWidth + (handle ? gap + handleWidth : 0),
+      height: HEADER_HEIGHT,
     };
+    return { pill, handle, hit, number, numberWidth, text };
   }
 
   function drawHandle(item, index, scale) {
@@ -1254,23 +1691,60 @@ function createEditor(node) {
     context.stroke();
   }
 
-  function drawBadge(item, index) {
-    if (!badgeVisible(item)) return;
-    const center = badgeCenter(item);
-    context.beginPath();
-    context.arc(center.x, center.y, BADGE_RADIUS, 0, Math.PI * 2);
-    context.fillStyle = colorOf(item);
+  function drawHeader(item, index) {
+    const header = headerMetrics(item, index);
+    if (!header) return;
+    const { pill, handle } = header;
+    const color = colorOf(item);
+    const ink = textOn(color);
+    const active = index === selection;
+    const hovered = index === hover;
+
+    context.save();
+    roundedRect(context, pill.x, pill.y, pill.width, pill.height, HEADER_RADIUS);
+    context.fillStyle = color;
+    context.globalAlpha = active || hovered ? 1 : 0.92;
     context.fill();
-    if (index === selection) {
-      context.lineWidth = 2;
-      context.strokeStyle = "#f2f4f7";
+    context.globalAlpha = 1;
+    if (active) {
+      context.lineWidth = 1.5;
+      context.strokeStyle = "rgba(255, 255, 255, 0.95)";
+      context.stroke();
+    } else if (hovered) {
+      context.lineWidth = 1;
+      context.strokeStyle = "rgba(255, 255, 255, 0.7)";
       context.stroke();
     }
-    context.fillStyle = "#101318";
-    context.font = "bold 10px ui-sans-serif, system-ui, sans-serif";
-    context.textAlign = "center";
+
+    context.fillStyle = ink;
+    context.font = HEADER_FONT;
+    context.textAlign = "left";
     context.textBaseline = "middle";
-    context.fillText(String(index + 1), center.x, center.y + 0.5);
+    const baseline = pill.y + pill.height / 2 + 0.5;
+    context.fillText(header.number, pill.x + HEADER_PAD, baseline);
+    if (header.text) {
+      context.font = HEADER_TEXT_FONT;
+      context.fillText(header.text, pill.x + HEADER_PAD + header.numberWidth + HEADER_PAD, baseline);
+    }
+
+    if (handle) {
+      roundedRect(context, handle.x, handle.y, handle.width, handle.height, HEADER_RADIUS);
+      context.fillStyle = color;
+      context.globalAlpha = active || hovered ? 1 : 0.92;
+      context.fill();
+      context.globalAlpha = 1;
+      if (active) {
+        context.lineWidth = 1.5;
+        context.strokeStyle = "rgba(255, 255, 255, 0.95)";
+        context.stroke();
+      } else if (hovered) {
+        context.lineWidth = 1;
+        context.strokeStyle = "rgba(255, 255, 255, 0.7)";
+        context.stroke();
+      }
+      drawMoveGlyph(context, handle.x + handle.width / 2, handle.y + handle.height / 2, handle.height, ink);
+    }
+    context.restore();
   }
 
   function drawOverlay(scale) {
@@ -1285,7 +1759,7 @@ function createEditor(node) {
         };
         return area(b) - area(a) || a - b;
       });
-    for (const index of order) drawBadge(state.items[index], index);
+    for (const index of order) drawHeader(state.items[index], index);
   }
 
   function draw() {
@@ -1354,6 +1828,12 @@ function createEditor(node) {
     return { x: (event.clientX - rect.left) / zoom, y: (event.clientY - rect.top) / zoom };
   }
 
+  // Header geometry is kept in CSS pixels (see headerMetrics), so hit tests run
+  // there too instead of in image coordinates.
+  function toScreen(point) {
+    return { x: view.x + point.x * view.scale, y: view.y + point.y * view.scale };
+  }
+
   function handleBoxAt(point) {
     const radius = 12 / (view.scale * screenScale());
     for (let index = state.items.length - 1; index >= 0; index -= 1) {
@@ -1372,26 +1852,23 @@ function createEditor(node) {
     return stack;
   }
 
-  // 数字标是最小但最可靠的抓手：它画在所有框之上，所以永远能被点到。
-  // 注意：badgeCenter() 返回的是画布 CSS 坐标（给绘制用），这里必须换算回图像坐标。
-  function badgeItemAt(point) {
-    const scale = view.scale || 1;
-    const limit = BADGE_RADIUS + BADGE_SLACK;
+  // The tab is small but the most reliable handle: it paints above every box,
+  // and its whole blue area — number, text and move glyph — is the target.
+  function headerItemAt(point) {
+    const screen = toScreen(point);
     let best = -1;
-    let bestDistance = Infinity;
     let bestArea = Infinity;
     state.items.forEach((item, index) => {
-      if (!badgeVisible(item)) return;
+      const header = headerMetrics(item, index);
+      if (!header) return;
+      const { hit } = header;
+      if (screen.x < hit.x - HEADER_HIT_SLACK || screen.x > hit.x + hit.width + HEADER_HIT_SLACK) return;
+      if (screen.y < hit.y - HEADER_HIT_SLACK || screen.y > hit.y + hit.height + HEADER_HIT_SLACK) return;
       const [x1, y1, x2, y2] = item.bbox;
-      const centerX = x1 + BADGE_OFFSET / scale;
-      const centerY = y1 + BADGE_OFFSET / scale;
-      const distance = Math.hypot(point.x - centerX, point.y - centerY) * scale;
-      if (distance > limit) return;
       const area = (x2 - x1) * (y2 - y1);
-      // 距离优先；同样命中时取更小的框（也就是更靠内的那个）。
-      if (distance < bestDistance - 0.5 || (Math.abs(distance - bestDistance) <= 0.5 && area < bestArea)) {
+      // Headers paint smallest-area-last, so the smallest hit is the topmost.
+      if (area <= bestArea) {
         best = index;
-        bestDistance = distance;
         bestArea = area;
       }
     });
@@ -1429,12 +1906,12 @@ function createEditor(node) {
       console.warn("[moss-layoutPrompt] pointer capture unavailable, dragging via window events", error);
     }
     const point = toImage(event);
-    const badge = badgeItemAt(point);
-    if (badge >= 0) {
+    const header = headerItemAt(point);
+    if (header >= 0) {
       resetCycle();
-      drag = { mode: "move", index: badge, box: state.items[badge].bbox.slice(), origin: point, moved: false };
-      selectIndex(badge);
-      hover = badge;
+      drag = { mode: "move", index: header, box: state.items[header].bbox.slice(), origin: point, moved: false };
+      selectIndex(header);
+      hover = header;
       return;
     }
     const handle = handleBoxAt(point);
@@ -1543,15 +2020,15 @@ function createEditor(node) {
     const point = toImage(event);
     const position = toCanvas(event);
     if (!drag) {
-      const badge = badgeItemAt(point);
-      const handle = badge >= 0 ? -1 : handleBoxAt(point);
-      const stack = badge < 0 && handle < 0 ? itemsAt(point) : [];
-      const target = badge >= 0 ? badge : handle >= 0 ? handle : stack.length ? stack[0] : -1;
+      const header = headerItemAt(point);
+      const handle = header >= 0 ? -1 : handleBoxAt(point);
+      const stack = header < 0 && handle < 0 ? itemsAt(point) : [];
+      const target = header >= 0 ? header : handle >= 0 ? handle : stack.length ? stack[0] : -1;
       const count = stack.length;
       const dirty = target !== hover || count !== overlap;
       hover = target;
       overlap = count;
-      canvas.style.cursor = badge >= 0 ? "grab" : handle >= 0 ? "nwse-resize" : count ? "move" : "crosshair";
+      canvas.style.cursor = header >= 0 ? "grab" : handle >= 0 ? "nwse-resize" : count ? "move" : "crosshair";
       if (count > 1) showOverlapChip(position, count);
       else hideOverlapChip();
       if (dirty) draw();
@@ -1640,6 +2117,7 @@ function createEditor(node) {
     window.clearInterval(widgetWatch);
     window.clearTimeout(sourceTimer);
     window.clearTimeout(statusTimer);
+    closeSourceDialog();
     return onRemoved?.apply(this, args);
   };
   const onResize = node.onResize;
