@@ -872,7 +872,11 @@ function createEditor(node) {
     if (!force && text === lastSourceText) return false;
     try {
       if (loadDraftText(text, null)) {
-        lastSourceText = text;
+        // loadDraftText syncs the canvas, and that sync mirrors the normalized
+        // draft back into `source`. Remember what the field actually holds now,
+        // not the raw paste — otherwise the pending debounce sees a mismatch and
+        // replays the load, re-running the whole parse and overwriting the hint.
+        lastSourceText = sourceText();
         lastWarnText = "";
         return true;
       }
@@ -2683,13 +2687,18 @@ function createEditor(node) {
   function endDrag() {
     if (!drag) return;
     const created = drag.mode === "create" && drag.index >= 0;
-    const changed = created || drag.mode === "move" || drag.mode === "resize";
+    // A plain click also enters "move" mode, but nothing changed. Syncing on it is
+    // not just wasteful: the sync mirrors the draft into `source`, that DOM churn
+    // makes the frontend re-run onConfigure, and `load()` → `applyDraft()` calls
+    // resetCycle() — which wipes the overlap rotation state, so a second click on
+    // the same stack could never advance.
+    const moved = drag.moved === true;
     drag = null;
     if (created) {
       render();
       list.scrollTop = list.scrollHeight;
     }
-    if (changed) sync();
+    if (created || moved) sync();
     draw();
   }
 
