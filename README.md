@@ -89,7 +89,10 @@ canvas size.
   workflow shows the ratio it is actually using. `自定义` mode has no ratio
   control, so it states the ratio of the current size below the fields
   (`比例 16:9`), or the actual value when it is off the preset table — the quick
-  way to confirm a pasted prompt landed on the ratio it came from.
+  way to confirm a pasted prompt landed on the ratio it came from. A pasted draft
+  is snapped the same way and the status line states the before/after size. A
+  workflow that was saved with a size that is not a multiple of 16 is left
+  untouched on load — its card header just flags `非 16 倍数` so you can decide.
 - `编译结果预览` at the bottom mirrors the node output exactly. `复制` copies what
   is on screen; `复制草稿` copies a draft carrying the canvas size and absolute
   coordinates, which restores the layout completely when pasted back into
@@ -120,7 +123,10 @@ canvas size.
 - The right panel edits the summary prompt and one row per box: `label`
   (`object`, `character`, `text`), `caption` describing how the element looks,
   and for text items the exact `text` to render. `caption`, `text` and the
-  summary prompt are multiline boxes that grow with their content.
+  summary prompt are multiline boxes that grow with their content. `caption` may
+  be empty, `text` may not — the backend requires a nonempty `text` on a `text`
+  item, so emptying one raises a persistent warning above the box list and marks
+  that card, instead of only failing when the queue runs.
 - `meta` tags are chips: type and press Enter or comma to add one, click a chip
   to edit it in place, and click anywhere outside the chip (or press Enter) to
   finish. `Esc` cancels the edit; `×` removes the tag.
@@ -163,7 +169,9 @@ behaves like a plain text prompt.
 
 Validation only covers the shape of the draft: canvas size, box geometry,
 `label` values and field names. Captions are content, so leaving the summary
-prompt or a box caption empty is allowed and the node still runs.
+prompt or a box caption empty is allowed and the node still runs. A `text` item
+is the exception: its `text` is what the model renders, so it must be nonempty —
+the editor warns about it while you edit rather than letting it fail on execute.
 
 A draft can also arrive through the `source` input. Pasting or importing there
 loads it onto the canvas, which stays the source of truth for editing; a

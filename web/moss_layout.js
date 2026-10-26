@@ -163,6 +163,8 @@ const CSS = `
 .mlp-card{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border-radius:8px;
   border:1px solid #2e343e;background:#1b1f26;transition:border-color .12s,background .12s}
 .mlp-card.is-active{border-color:#4a9eff;background:#1f2834}
+.mlp-card.is-warn{border-color:#8a5a1e}
+.mlp-card.is-warn.is-active{border-color:#d08a25}
 .mlp-head{display:flex;align-items:center;gap:6px}
 .mlp-badge{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:#c4cad4}
 .mlp-dot{width:8px;height:8px;border-radius:50%}
@@ -228,7 +230,11 @@ const CSS = `
 .mlp-label-inline{font-size:11px;color:#8b93a1;min-width:22px}
 .mlp-unit-text{font-size:11px;color:#6b7380}
 .mlp-note-text{font-size:11px;color:#6b7380}
+.mlp-warn{display:flex;gap:6px;padding:6px 8px;border:1px solid #8a5a1e;border-radius:6px;
+  background:#2a1f11;color:#f0b46a;font-size:11px;line-height:1.55}
+.mlp-warn.is-hidden{display:none}
 .mlp-area{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#8fd18f;white-space:nowrap}
+.mlp-area.is-warn{color:#f0b46a}
 .mlp-seg{display:inline-flex;border:1px solid #343b47;border-radius:6px;overflow:hidden;flex:0 0 auto}
 .mlp-seg button{border:0;border-radius:0;background:#1b1f26;color:#9aa3b0;padding:4px 10px;
   font:11px/1.5 ui-sans-serif,system-ui,sans-serif;cursor:pointer;transition:background .12s,color .12s}
@@ -1335,6 +1341,34 @@ function createEditor(node) {
     if (!copied) flash("复制失败，可手动选中文本复制");
   }
 
+  // layout.py rejects a text region whose `text` is empty or whitespace-only
+  // (`_text` requires a nonempty string), but the preview is pure JS and can
+  // never know that upfront. Deleting the text to retype it is a legitimate
+  // intermediate state, so keep the data and flag it in place — blocking sync
+  // would leave the widget holding a stale draft while the UI shows empty.
+  const warnBar = h("div", { class: "mlp-warn is-hidden" });
+
+  function textGaps() {
+    const gaps = [];
+    state.items.forEach((item, index) => {
+      if (item.label === "text" && !String(item.text ?? "").trim()) gaps.push(index + 1);
+    });
+    return gaps;
+  }
+
+  function refreshWarnings() {
+    if (!warnBar) return;
+    const gaps = textGaps();
+    for (let index = 0; index < state.items.length; index += 1) {
+      cards[index]?.element?.classList.toggle("is-warn", gaps.includes(index + 1));
+    }
+    const message = gaps.length
+      ? `${gaps.map((number) => `#${number}`).join("、")} 是 text 区域但内容为空 · 执行时后端会拒绝（text must be nonempty text），请填写内容或把类型改回 object`
+      : "";
+    warnBar.classList.toggle("is-hidden", !gaps.length);
+    if (warnBar.textContent !== message) warnBar.textContent = message;
+  }
+
   const preview = h("div", { class: "mlp-preview" }, [
     h("div", { class: "mlp-preview-head" }, [
       h("span", { class: "mlp-title", text: "编译结果预览" }),
@@ -1500,7 +1534,12 @@ function createEditor(node) {
 
   function refreshCanvasReadout() {
     if (!canvasReadout) return;
-    canvasReadout.textContent = `${state.width} × ${state.height} · ${areaLabel(state.width, state.height)}`;
+    // A workflow saved elsewhere can carry a size the backend rejects. Snapping
+    // on load would silently rewrite saved geometry, so only flag it here.
+    const odd = state.width % SIZE_MULTIPLE !== 0 || state.height % SIZE_MULTIPLE !== 0;
+    canvasReadout.textContent = `${state.width} × ${state.height} · ${areaLabel(state.width, state.height)}`
+      + (odd ? " · 非 16 倍数" : "");
+    canvasReadout.classList.toggle("is-warn", odd);
     if (canvasNote) canvasNote.textContent = ratioHint();
   }
 
@@ -1780,6 +1819,15 @@ function createEditor(node) {
     if (widget && Number(widget.value) !== value) widget.value = value;
   }
 
+  // Imported boxes can carry fractions (external tooling, proportional math).
+  // layout.py rounds those outward — floor the start, ceil the end — so a
+  // fractional box still covers the content it describes. Rounding to nearest
+  // here would clip up to 1px off the box, so match the backend on the way in.
+  // Only the import path uses this; dragging still rounds to nearest below.
+  function coverBox(box) {
+    return [Math.floor(box[0]), Math.floor(box[1]), Math.ceil(box[2]), Math.ceil(box[3])];
+  }
+
   function normalizeItem(entry) {
     if (!entry || typeof entry !== "object") return null;
     const box = Array.isArray(entry.bbox) ? entry.bbox.map(Number) : null;
@@ -1789,7 +1837,7 @@ function createEditor(node) {
       caption: typeof entry.caption === "string" ? entry.caption : "",
       text: typeof entry.text === "string" ? entry.text : "",
       color: typeof entry.color === "string" && HEX_COLOR.test(entry.color) ? entry.color.toLowerCase() : null,
-      bbox: fitBox(box),
+      bbox: fitBox(coverBox(box)),
     };
     for (const key of PASS_THROUGH_FIELDS) {
       const values = stringArray(entry[key]);
@@ -1878,6 +1926,7 @@ function createEditor(node) {
     if (widget) widget.value = draftJson;
     renderPreview(draft);
     mirrorSource(draftJson);
+    refreshWarnings();
   }
 
   function load() {
@@ -1911,8 +1960,29 @@ function createEditor(node) {
     let draft = parsed;
     if (isSceneSchema(parsed)) draft = draftFromSceneSchema(parsed, state.width, state.height);
     else if (compiled) draft = draftFromCompiled(parsed, state.width, state.height);
+    const converted = draft !== parsed;
+
+    // layout.py only accepts canvas sizes that are a multiple of 16. The size
+    // panel snaps, but a pasted draft used to land in `state` untouched, so the
+    // editor would happily show a canvas the backend rejects at execution time.
+    // Snap here (import only — never in applyDraft, which also runs when loading
+    // an existing workflow and must not rewrite its saved geometry). When the
+    // size came from a compiled prompt it is just the current canvas, already
+    // snapped, so there is nothing to do.
+    let snapNote = "";
+    const declaredWidth = Number(draft.width);
+    const declaredHeight = Number(draft.height);
+    if (declaredWidth > 0 && declaredHeight > 0 && !(compiled && !carriedSize)) {
+      const snappedWidth = snapCanvas(declaredWidth);
+      const snappedHeight = snapCanvas(declaredHeight);
+      if (snappedWidth !== declaredWidth || snappedHeight !== declaredHeight) {
+        snapNote = `画布 ${declaredWidth}×${declaredHeight} 不是 16 的倍数，已吸附为 ${snappedWidth}×${snappedHeight}（后端校验要求）`;
+        draft = { ...draft, width: snappedWidth, height: snappedHeight };
+      }
+    }
+
     let fittedNote = "";
-    if (draft !== parsed) {
+    if (converted) {
       const fitted = fitDraftToCanvas(draft);
       if (fitted) {
         draft = fitted;
@@ -1936,7 +2006,8 @@ function createEditor(node) {
     sync();
     draw();
     const boxes = `${draft.items.length} 个分区`;
-    if (fittedNote) flash(fittedNote);
+    const notes = [snapNote, fittedNote].filter(Boolean);
+    if (notes.length) flash(`${notes.join(" · ")} · ${boxes}`);
     else if (compiled && !carriedSize) {
       flash(`已载入编译结果（它不含画布尺寸）· ${boxes}按当前 ${draft.width}×${draft.height} 换算`);
     } else {
@@ -2217,6 +2288,7 @@ function createEditor(node) {
       canvasCard(),
       summaryCard(),
       toolbar(),
+      warnBar,
       ...rows,
       h("div", {
         class: "mlp-hint",
@@ -2225,6 +2297,7 @@ function createEditor(node) {
     );
     list.querySelectorAll(".mlp-textarea").forEach(autosize);
     renderPreview();
+    refreshWarnings();
   }
 
   function addItem(box) {
