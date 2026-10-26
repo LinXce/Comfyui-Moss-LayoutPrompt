@@ -77,6 +77,27 @@ canvas size.
 
 ## Editor
 
+- `画布尺寸` at the top of the right panel sets the canvas two ways. In `自定义`
+  mode you type `宽` / `高` directly. In `预设` mode you pick a ratio (`1:1`,
+  `3:2`, `16:9`, `21:9`, …) and a long edge, and `横屏` / `竖屏` decides whether
+  that long edge becomes the width or the height — `16:9` at 2560 in landscape
+  gives 2560×1440. The dropdown left of the long edge lists the common values and
+  applies one on click; the field beside it takes any value, and picking `自定义…`
+  puts the cursor there. Every size is snapped to the multiple of 16 the backend
+  requires, and the card header shows the area in megapixels (`2560 × 1440 ·
+  3.69 M`). The mode is re-derived from the canvas on load, so a reopened
+  workflow shows the ratio it is actually using. `自定义` mode has no ratio
+  control, so it states the ratio of the current size below the fields
+  (`比例 16:9`), or the actual value when it is off the preset table — the quick
+  way to confirm a pasted prompt landed on the ratio it came from.
+- `编译结果预览` at the bottom mirrors the node output exactly. `复制` copies what
+  is on screen; `复制草稿` copies a draft carrying the canvas size and absolute
+  coordinates, which restores the layout completely when pasted back into
+  `source`. The header toggles between `JSON` and `文本`: `JSON` is the canonical
+  form, where a `\(` in the prompt is written `\\(` as JSON demands, and can be
+  pasted back; `文本` folds each backslash back to one for reading or for handing
+  the prompt to another tool, but it is **not valid JSON and cannot be pasted
+  back**.
 - Drag on empty canvas to create a box, drag inside a box to move it, and drag
   the dot at its bottom-right corner to resize it — the dot shows on hover or on
   the selected box. A box can also be typed as `x1, y1, x2, y2`.
@@ -113,6 +134,10 @@ canvas size.
   a compiled `abs_centralized`/`yxyx` prompt or a legacy `scene_type`/`elements`
   scene prompt is converted with the node's `width`/`height`. If the converted
   boxes overflow the canvas they are scaled uniformly around its centre to fit.
+  Note that a **compiled prompt carries no canvas size** (the backend emits only
+  `summary`, `items` and the two format fields), so pasting one back never
+  resizes the canvas — it is converted against the current one. Use the
+  `复制草稿` format to carry the size, or set the canvas first and paste after.
 - The bottom of the panel pins a read-only preview of the prompt the node will
   output, so the compiled result is always visible while you edit.
 
