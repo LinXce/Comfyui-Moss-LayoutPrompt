@@ -96,8 +96,9 @@ canvas size.
   `source`. The header toggles between `JSON` and `文本`: `JSON` is the canonical
   form, where a `\(` in the prompt is written `\\(` as JSON demands, and can be
   pasted back; `文本` folds each backslash back to one for reading or for handing
-  the prompt to another tool, but it is **not valid JSON and cannot be pasted
-  back**.
+  the prompt to another tool. Note that `文本` is **not valid JSON**: it can still
+  be pasted back thanks to the tolerant parser, but a doubled backslash (as in
+  LaTeX `\\`) collapses to one — use `复制草稿` for a lossless round trip.
 - Drag on empty canvas to create a box, drag inside a box to move it, and drag
   the dot at its bottom-right corner to resize it — the dot shows on hover or on
   the selected box. A box can also be typed as `x1, y1, x2, y2`.
@@ -138,8 +139,6 @@ canvas size.
   `summary`, `items` and the two format fields), so pasting one back never
   resizes the canvas — it is converted against the current one. Use the
   `复制草稿` format to carry the size, or set the canvas first and paste after.
-- The bottom of the panel pins a read-only preview of the prompt the node will
-  output, so the compiled result is always visible while you edit.
 
 ## Draft and compiled prompts
 

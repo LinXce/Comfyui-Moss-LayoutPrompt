@@ -1014,7 +1014,7 @@ function createEditor(node) {
       return;
     }
     try {
-      if (!loadDraftText(text, null)) {
+      if (!loadDraftText(text, null, true)) {
         setDialogNote(note, "无法解析这段文本：需要草稿 JSON、已编译提示词或旧版 scene 提示词", true);
         return;
       }
@@ -1264,7 +1264,7 @@ function createEditor(node) {
   let previewDisplay = "json";
   const PREVIEW_DISPLAY = [
     { value: "json", label: "JSON", title: "标准 JSON 视图：反斜杠会写成两个，可以直接回贴" },
-    { value: "text", label: "文本", title: "文本视图：反斜杠还原成一个，便于阅读或外发；不是合法 JSON，不能回贴" },
+    { value: "text", label: "文本", title: "文本视图：反斜杠还原成一个，便于阅读或外发；成对反斜杠会丢一个，要完整还原请用「复制草稿」" },
   ];
   const previewModeBar = h("div", { class: "mlp-seg mlp-seg-mini" }, PREVIEW_DISPLAY.map((option) => h("button", {
     type: "button",
@@ -1282,7 +1282,7 @@ function createEditor(node) {
       button.classList.toggle("is-on", button.dataset.display === value);
     }
     renderPreview();
-    if (value === "text") flash("文本视图：反斜杠已还原 · 不能直接回贴");
+    if (value === "text") flash("文本视图：反斜杠已还原 · 成对反斜杠会丢一个");
   }
 
   // `sync()` hands over the draft snapshot it already built, so a drag never pays
@@ -1891,12 +1891,14 @@ function createEditor(node) {
     applySource();
   }
 
-  function loadDraftText(raw, label) {
+  // `silent` suppresses the toast for callers that report the failure themselves
+  // in place (the source dialog writes an inline note, so a toast would double up).
+  function loadDraftText(raw, label, silent = false) {
     const parsed = parseDraftText(raw);
     if (!parsed) {
       const message = "没有找到可用的草稿 JSON（需要含 summary / items 的对象）。";
       if (label) window.alert(`${label}：${message}`);
-      else if (raw !== lastWarnText) flash("没找到可用的草稿 JSON · 画布保持不变");
+      else if (!silent && raw !== lastWarnText) flash("没找到可用的草稿 JSON · 画布保持不变");
       lastWarnText = raw;
       return false;
     }
