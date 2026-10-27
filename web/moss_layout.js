@@ -1872,13 +1872,21 @@ function createEditor(node) {
     if (widget && Number(widget.value) !== value) widget.value = value;
   }
 
+  // layout.py collapses float noise to 9 decimals (`round(v, 9)`) before it
+  // rounds outward, so 927.9999999999 is 928 to the compiler while a bare floor
+  // reads 927. Proportional math routinely lands a hair under an integer, and
+  // without the same collapse the editor rewrites the value the compiler had
+  // just corrected — a silent 1px drift between the preview and the output.
+  const collapseNoise = (value) => Math.round(value * 1e9) / 1e9;
+
   // Imported boxes can carry fractions (external tooling, proportional math).
   // layout.py rounds those outward — floor the start, ceil the end — so a
   // fractional box still covers the content it describes. Rounding to nearest
   // here would clip up to 1px off the box, so match the backend on the way in.
   // Only the import path uses this; dragging still rounds to nearest below.
   function coverBox(box) {
-    return [Math.floor(box[0]), Math.floor(box[1]), Math.ceil(box[2]), Math.ceil(box[3])];
+    return [Math.floor(collapseNoise(box[0])), Math.floor(collapseNoise(box[1])),
+            Math.ceil(collapseNoise(box[2])), Math.ceil(collapseNoise(box[3]))];
   }
 
   function normalizeItem(entry) {
@@ -1957,7 +1965,8 @@ function createEditor(node) {
           entry[key] = value;
           continue;
         }
-        const [x1, y1, x2, y2] = value;
+        // Mirrors `_centered`: collapse noise first, then round outward.
+        const [x1, y1, x2, y2] = value.map(collapseNoise);
         entry.bbox = [Math.floor(y1) - halfHeight, Math.floor(x1) - halfWidth,
                       Math.ceil(y2) - halfHeight, Math.ceil(x2) - halfWidth];
       }
