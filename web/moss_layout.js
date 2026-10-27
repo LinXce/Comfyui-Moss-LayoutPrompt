@@ -46,6 +46,49 @@ const SOURCE_POLL = 600;
 const SIDE_WIDTH = 360;
 const DEFAULT_SIZE = 1024;
 const STYLE_ID = "moss-layout-style";
+// The backend rejects anything that is not a positive multiple of 16, so every
+// canvas size this panel produces is snapped to that grid before it is written.
+const SIZE_MULTIPLE = 16;
+const MAX_CANVAS = SIZE_MULTIPLE * 1024;
+// Two different grids live in this editor and they are easy to mix up:
+// canvas width/height must be multiples of 16 (the node input uses step=16 and
+// layout.py raises LayoutError otherwise), while box edges only need multiples
+// of 8 ("对齐到 8"). Spell it out in the tooltips.
+const CANVAS_STEP_HINT = "画布宽高必须是 16 的倍数（后端校验要求），输入会自动吸附；框坐标的「对齐到 8」是另一回事";
+const AREA_UNIT = 1e6;
+const AREA_DIGITS = 2;
+
+// Aspect ratios, largest-edge-first so a label always reads "longer:shorter".
+const RATIOS = [
+  { label: "1:1", w: 1, h: 1 },
+  { label: "5:4", w: 5, h: 4 },
+  { label: "4:3", w: 4, h: 3 },
+  { label: "19:13", w: 19, h: 13 },
+  { label: "3:2", w: 3, h: 2 },
+  { label: "16:10", w: 16, h: 10 },
+  { label: "7:4", w: 7, h: 4 },
+  { label: "16:9", w: 16, h: 9 },
+  { label: "2:1", w: 2, h: 1 },
+  { label: "21:9", w: 21, h: 9 },
+];
+
+// Common long edges. Offered as input suggestions rather than a closed list, so
+// an unusual target can still be typed in.
+const LONG_EDGES = [480, 512, 640, 720, 768, 832, 896, 960, 1024, 1080, 1088, 1152,
+  1216, 1280, 1344, 1440, 1536, 1600, 1680, 1920, 2048, 2344, 2440, 2560, 3072, 3840];
+// Allowed slack when matching the live canvas back onto a ratio preset. Snapping
+// the short edge to 16 costs at most 8px, so 12 is tight enough to keep 3:2 and
+// 19:13 apart at any usable long edge.
+const RATIO_SLACK = 12;
+
+const MODE_OPTIONS = [
+  { value: "custom", label: "自定义", title: "直接输入宽高" },
+  { value: "preset", label: "预设", title: "按比例和长边自动算宽高" },
+];
+const ORIENT_OPTIONS = [
+  { value: "landscape", label: "横屏", title: "长边作为宽" },
+  { value: "portrait", label: "竖屏", title: "长边作为高" },
+];
 
 const CSS = `
 .mlp-root{display:flex;gap:10px;width:100%;height:100%;box-sizing:border-box;padding:2px;
@@ -120,6 +163,8 @@ const CSS = `
 .mlp-card{display:flex;flex-direction:column;gap:6px;padding:8px 10px;border-radius:8px;
   border:1px solid #2e343e;background:#1b1f26;transition:border-color .12s,background .12s}
 .mlp-card.is-active{border-color:#4a9eff;background:#1f2834}
+.mlp-card.is-warn{border-color:#8a5a1e}
+.mlp-card.is-warn.is-active{border-color:#d08a25}
 .mlp-head{display:flex;align-items:center;gap:6px}
 .mlp-badge{display:inline-flex;align-items:center;gap:6px;font-weight:600;color:#c4cad4}
 .mlp-dot{width:8px;height:8px;border-radius:50%}
@@ -180,6 +225,32 @@ const CSS = `
 .mlp-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:2px 0}
 .mlp-count{margin-left:auto;color:#6b7380;font-size:11px}
 .mlp-hint{color:#6b7380;font-size:11px;padding:0 2px 4px;margin-top:-2px}
+.mlp-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.mlp-row+.mlp-row{margin-top:6px}
+.mlp-label-inline{font-size:11px;color:#8b93a1;min-width:22px}
+.mlp-unit-text{font-size:11px;color:#6b7380}
+.mlp-note-text{font-size:11px;color:#6b7380}
+.mlp-warn{display:flex;gap:6px;padding:6px 8px;border:1px solid #8a5a1e;border-radius:6px;
+  background:#2a1f11;color:#f0b46a;font-size:11px;line-height:1.55}
+.mlp-warn.is-hidden{display:none}
+.mlp-area{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#8fd18f;white-space:nowrap}
+.mlp-fold{border:none;background:transparent;color:#7d8592;cursor:pointer;font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;padding:2px 4px;border-radius:4px;line-height:1}
+.mlp-fold:hover{background:#2a323d;color:#e2e5ea}
+.mlp-area.is-warn{color:#f0b46a}
+.mlp-seg{display:inline-flex;border:1px solid #343b47;border-radius:6px;overflow:hidden;flex:0 0 auto}
+.mlp-seg button{border:0;border-radius:0;background:#1b1f26;color:#9aa3b0;padding:4px 10px;
+  font:11px/1.5 ui-sans-serif,system-ui,sans-serif;cursor:pointer;transition:background .12s,color .12s}
+.mlp-seg button+button{border-left:1px solid #343b47}
+.mlp-seg button:hover{background:#242a33;color:#cfd4db}
+.mlp-seg button.is-on{background:#1f5fae;color:#fff}
+.mlp-seg button.is-on:hover{background:#2770c6}
+.mlp-seg-mini button{padding:2px 7px}
+.mlp-num-fixed{width:86px;flex:0 0 auto}
+.mlp-num-long{width:90px}
+.mlp-select-long{min-width:104px;flex:0 0 auto}
+.mlp-btn-mini{padding:1px 8px;font-size:11px;line-height:1.6;border-radius:5px;flex:0 0 auto}
+.mlp-btn-mini.is-ok{background:#1f5fae;border-color:#2a72cc;color:#fff}
+.mlp-canvas-row select.mlp-select{flex:0 0 auto}
 .mlp-chip-hint{position:absolute;z-index:2;pointer-events:none;display:none;padding:2px 7px;border-radius:5px;
   background:rgba(18,21,25,.92);border:1px solid rgba(255,255,255,.16);color:#c4cad4;
   font:11px/1.6 ui-sans-serif,system-ui,sans-serif;white-space:nowrap}
@@ -253,6 +324,47 @@ function select(options, value, onChange) {
   }, options.map((option) => h("option", { value: option, text: option })));
   element.value = value;
   return element;
+}
+
+// navigator.clipboard only exists in a secure context. ComfyUI on localhost
+// qualifies, but a workflow served from a LAN address over plain http does not,
+// so keep the legacy selection trick as a fallback.
+async function copyText(text) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (error) {
+    // Permission denied or insecure context — try the textarea route below.
+  }
+  const active = document.activeElement;
+  try {
+    const buffer = document.createElement("textarea");
+    buffer.value = text;
+    buffer.setAttribute("readonly", "");
+    buffer.style.cssText = "position:fixed;top:0;left:-9999px;opacity:0;pointer-events:none";
+    document.body.append(buffer);
+    buffer.select();
+    const copied = document.execCommand("copy");
+    buffer.remove();
+    if (active instanceof HTMLElement) active.focus();
+    return copied;
+  } catch (error) {
+    console.warn("[moss-layoutPrompt] copy failed", error);
+    return false;
+  }
+}
+
+// Two-state pill group, used for the size mode and the orientation.
+function segment(options, value, onChange) {
+  return h("div", { class: "mlp-seg" }, options.map((option) => h("button", {
+    type: "button",
+    class: option.value === value ? "is-on" : null,
+    title: option.title ?? null,
+    text: option.label,
+    onclick: () => onChange(option.value),
+  })));
 }
 
 function chipField(values, placeholder, onChange) {
@@ -430,28 +542,96 @@ function* jsonObjects(text) {
   }
 }
 
-function parseDraftText(raw) {
-  const text = typeof raw === "string" ? raw.trim() : "";
-  if (!text) return null;
-  try {
-    const value = JSON.parse(text);
-    if (value && typeof value === "object" && !Array.isArray(value)) return value;
-  } catch (error) {
-    // not plain JSON, fall through and scan for a wrapped object
-  }
-  let fallback = null;
-  for (const candidate of jsonObjects(text)) {
-    let value;
-    try {
-      value = JSON.parse(candidate);
-    } catch (error) {
+function looksLikeDraft(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+    && ("summary" in value || "items" in value || "elements" in value);
+}
+
+const JSON_SIMPLE_ESCAPES = new Set(['"', "\\", "/", "b", "f", "n", "r", "t"]);
+const HEX_DIGIT = /^[0-9a-fA-F]$/;
+
+// Stable Diffusion prompts escape parentheses as \( and \) to keep them out of
+// emphasis parsing, and that sequence is illegal inside JSON. A caption that
+// went through a prompt gets pasted back with the backslashes intact, so escape
+// them for the parser; the caption still reads \( afterwards.
+function repairJsonEscapes(text) {
+  let out = "";
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char !== "\\") {
+      out += char;
       continue;
     }
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-    if ("summary" in value || "items" in value || "elements" in value) return value;
-    if (!fallback) fallback = value;
+    const next = text[index + 1];
+    if (next === undefined) {
+      out += "\\\\";
+      continue;
+    }
+    if (JSON_SIMPLE_ESCAPES.has(next)) {
+      out += char + next;
+      index += 1;
+      continue;
+    }
+    if (next === "u") {
+      const hex = text.slice(index + 2, index + 6);
+      if (hex.length === 4 && [...hex].every((digit) => HEX_DIGIT.test(digit))) {
+        out += char + next;
+        index += 1;
+        continue;
+      }
+    }
+    out += "\\\\";
   }
-  return fallback;
+  return out;
+}
+
+// Returns undefined when the text is not JSON at all.
+function parseJsonLoose(text) {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    try {
+      return JSON.parse(repairJsonEscapes(text));
+    } catch (repaired) {
+      return undefined;
+    }
+  }
+}
+
+// One pass: plain JSON first, then scan for an object embedded in prose.
+function parseJsonOnce(text) {
+  const direct = parseJsonLoose(text);
+  if (direct !== undefined) {
+    // A double encoded widget value (a workflow stores the string as a string).
+    if (typeof direct === "string") return direct;
+    if (direct && typeof direct === "object" && !Array.isArray(direct)) return direct;
+  }
+  for (const candidate of jsonObjects(text)) {
+    const value = parseJsonLoose(candidate);
+    if (value === undefined || !value || typeof value !== "object" || Array.isArray(value)) continue;
+    if (looksLikeDraft(value) || "width" in value || "height" in value) return value;
+  }
+  return null;
+}
+
+// Accepts the shapes a draft actually arrives in: the draft itself, a JSON
+// string (copied out of a workflow), the same thing wrapped in prose, and a
+// {"layout": "..."} / {"source": "..."} envelope. Anything that is not draft
+// shaped resolves to null so a stray object can never blank the canvas.
+function parseDraftText(raw) {
+  let text = typeof raw === "string" ? raw.trim() : "";
+  for (let depth = 0; depth < 4 && text; depth += 1) {
+    const value = parseJsonOnce(text);
+    if (value === null) return null;
+    if (typeof value === "string") { text = value.trim(); continue; }
+    if (looksLikeDraft(value)) return value;
+    const wrapped = ["layout", "draft", "source"]
+      .map((key) => value[key])
+      .find((entry) => typeof entry === "string" && entry.trim());
+    if (wrapped) { text = wrapped.trim(); continue; }
+    return null;
+  }
+  return null;
 }
 
 function isSceneSchema(value) {
@@ -532,8 +712,17 @@ function isCompiledDraft(value) {
 }
 
 function draftFromCompiled(raw, width, height) {
-  const halfWidth = width / 2;
-  const halfHeight = height / 2;
+  // Compiled prompts carry centered offsets only, so the canvas has to come
+  // from somewhere: the draft itself when it still has a width/height, else the
+  // canvas the node is on right now.
+  const size = (value, fallback) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number > 0 ? Math.round(number) : fallback;
+  };
+  const canvasWidth = size(raw.width, width);
+  const canvasHeight = size(raw.height, height);
+  const halfWidth = canvasWidth / 2;
+  const halfHeight = canvasHeight / 2;
   const items = (Array.isArray(raw.items) ? raw.items : []).map((item) => {
     const box = Array.isArray(item?.bbox) ? item.bbox : null;
     if (!box || box.length !== 4) return item;
@@ -541,8 +730,8 @@ function draftFromCompiled(raw, width, height) {
     return { ...item, bbox: [x1 + halfWidth, y1 + halfHeight, x2 + halfWidth, y2 + halfHeight] };
   });
   return {
-    width,
-    height,
+    width: canvasWidth,
+    height: canvasHeight,
     bbox_coord_space: "abs",
     bbox_format: "xyxy",
     summary: raw.summary ?? { caption: "" },
@@ -667,6 +856,7 @@ function createEditor(node) {
 
   let sourceTimer = 0;
   let lastSourceText = "";
+  let lastWarnText = "";
   let styledSource = null;
   let sourceDialog = null;
 
@@ -682,11 +872,20 @@ function createEditor(node) {
 
   function applySource(force) {
     const text = sourceText();
-    if (!text) return false;
+    if (!text) {
+      lastSourceText = "";
+      lastWarnText = "";
+      return false;
+    }
     if (!force && text === lastSourceText) return false;
     try {
       if (loadDraftText(text, null)) {
-        lastSourceText = text;
+        // loadDraftText syncs the canvas, and that sync mirrors the normalized
+        // draft back into `source`. Remember what the field actually holds now,
+        // not the raw paste — otherwise the pending debounce sees a mismatch and
+        // replays the load, re-running the whole parse and overwriting the hint.
+        lastSourceText = sourceText();
+        lastWarnText = "";
         return true;
       }
     } catch (error) {
@@ -827,7 +1026,7 @@ function createEditor(node) {
       return;
     }
     try {
-      if (!loadDraftText(text, null)) {
+      if (!loadDraftText(text, null, true)) {
         setDialogNote(note, "无法解析这段文本：需要草稿 JSON、已编译提示词或旧版 scene 提示词", true);
         return;
       }
@@ -1065,13 +1264,120 @@ function createEditor(node) {
     class: "mlp-preview-body",
     readonly: "readonly",
     spellcheck: "false",
+    title: "只读预览",
     onkeydown: (event) => event.stopPropagation(),
   });
+
+  // JSON requires every backslash to be doubled, so a prompt written as
+  // `lumine \(genshin impact\)` shows up as `\\(` in the serialised text. The
+  // "text" view folds each escape pair back to what the prompt really holds; it
+  // is meant for reading and for handing the prompt to other tools, and is not
+  // valid JSON, so it must never be pasted back into the source box.
+  let previewDisplay = "json";
+  const PREVIEW_DISPLAY = [
+    { value: "json", label: "JSON", title: "标准 JSON 视图：反斜杠会写成两个，可以直接回贴" },
+    { value: "text", label: "文本", title: "文本视图：反斜杠还原成一个，便于阅读或外发；成对反斜杠会丢一个，要完整还原请用「复制草稿」" },
+  ];
+  const previewModeBar = h("div", { class: "mlp-seg mlp-seg-mini" }, PREVIEW_DISPLAY.map((option) => h("button", {
+    type: "button",
+    class: option.value === "json" ? "is-on" : null,
+    title: option.title,
+    text: option.label,
+    "data-display": option.value,
+    onclick: () => setPreviewDisplay(option.value),
+  })));
+
+  function setPreviewDisplay(value) {
+    if (previewDisplay === value) return;
+    previewDisplay = value;
+    for (const button of previewModeBar.children) {
+      button.classList.toggle("is-on", button.dataset.display === value);
+    }
+    renderPreview();
+    if (value === "text") flash("文本视图：反斜杠已还原 · 成对反斜杠会丢一个");
+  }
+
+  // `sync()` hands over the draft snapshot it already built, so a drag never pays
+  // for a second buildDraft() just to repaint the preview.
+  function renderPreview(draft = buildDraft()) {
+    const json = compiledPrompt(draft);
+    // With no items the preview is the bare caption, not JSON — leave it alone.
+    previewBody.value = previewDisplay === "text" && state.items.length
+      ? json.replace(/\\\\/g, "\\")
+      : json;
+  }
+
+  const copyButton = h("button", {
+    type: "button",
+    class: "mlp-btn mlp-btn-mini",
+    title: "把下面这段完整提示词复制到剪贴板",
+    text: "复制",
+    onclick: () => copyWithFeedback(copyButton, previewBody.value ?? "", "复制"),
+  });
+  const draftButton = h("button", {
+    type: "button",
+    class: "mlp-btn mlp-btn-mini",
+    title: "复制可回贴的草稿（含画布尺寸与原始坐标），贴回上方输入框能完整还原",
+    text: "复制草稿",
+    onclick: () => copyWithFeedback(draftButton, draftText(), "复制草稿"),
+  });
+  const copyTimers = new WeakMap();
+
+  function draftText() {
+    return JSON.stringify(buildDraft(), null, 2);
+  }
+
+  async function copyWithFeedback(button, text, idleLabel) {
+    if (!text.trim()) {
+      flash("没有可复制的内容");
+      return;
+    }
+    const copied = await copyText(text);
+    button.textContent = copied ? "已复制 ✓" : "复制失败";
+    button.classList.toggle("is-ok", copied);
+    window.clearTimeout(copyTimers.get(button));
+    copyTimers.set(button, window.setTimeout(() => {
+      button.textContent = idleLabel;
+      button.classList.remove("is-ok");
+    }, 1600));
+    if (!copied) flash("复制失败，可手动选中文本复制");
+  }
+
+  // layout.py rejects a text region whose `text` is empty or whitespace-only
+  // (`_text` requires a nonempty string), but the preview is pure JS and can
+  // never know that upfront. Deleting the text to retype it is a legitimate
+  // intermediate state, so keep the data and flag it in place — blocking sync
+  // would leave the widget holding a stale draft while the UI shows empty.
+  const warnBar = h("div", { class: "mlp-warn is-hidden" });
+
+  function textGaps() {
+    const gaps = [];
+    state.items.forEach((item, index) => {
+      if (item.label === "text" && !String(item.text ?? "").trim()) gaps.push(index + 1);
+    });
+    return gaps;
+  }
+
+  function refreshWarnings() {
+    if (!warnBar) return;
+    const gaps = textGaps();
+    for (let index = 0; index < state.items.length; index += 1) {
+      cards[index]?.element?.classList.toggle("is-warn", gaps.includes(index + 1));
+    }
+    const message = gaps.length
+      ? `${gaps.map((number) => `#${number}`).join("、")} 是 text 区域但内容为空 · 执行时后端会拒绝（text must be nonempty text），请填写内容或把类型改回 object`
+      : "";
+    warnBar.classList.toggle("is-hidden", !gaps.length);
+    if (warnBar.textContent !== message) warnBar.textContent = message;
+  }
+
   const preview = h("div", { class: "mlp-preview" }, [
     h("div", { class: "mlp-preview-head" }, [
       h("span", { class: "mlp-title", text: "编译结果预览" }),
       h("span", { class: "mlp-spacer" }),
-      h("span", { class: "mlp-count", text: "只读 · 与节点输出一致" }),
+      previewModeBar,
+      draftButton,
+      copyButton,
     ]),
     previewBody,
   ]);
@@ -1138,6 +1444,356 @@ function createEditor(node) {
     widget.__mlpHidden = true;
     widget.hidden = true;
     widget.computeSize = () => [0, -4];
+  }
+
+  // --- canvas size panel ---------------------------------------------------
+  // Kept in memory and re-derived from the live canvas on load, so a saved
+  // workflow reopens in whatever mode matches its width/height without adding a
+  // widget the backend would have to validate.
+  const canvasUI = { mode: "preset", ratio: "16:9", longEdge: 2048, orient: "landscape", edgeCustom: false };
+  let canvasReadout = null;
+  let canvasNote = null;
+  let canvasBody = null;
+  let canvasFoldButton = null;
+  let longEdgeSelect = null;
+  let longEdgeInput = null;
+  let paintCanvasBody = () => {};
+
+  // Whether the size card is folded is a view preference, not part of the
+  // layout, so it lives in localStorage instead of the draft widget — same
+  // reason canvasUI is memory-only.
+  const CANVAS_FOLD_KEY = "moss-layout.canvas-folded";
+  let canvasFolded = (() => {
+    try {
+      return window.localStorage.getItem(CANVAS_FOLD_KEY) === "1";
+    } catch {
+      return false;
+    }
+  })();
+
+  function applyCanvasFold() {
+    if (!canvasBody || !canvasFoldButton) return;
+    // Hide the body rather than detaching it: paintCanvasBody() rewrites its
+    // children on every render and would write into a detached node.
+    canvasBody.style.display = canvasFolded ? "none" : "";
+    canvasFoldButton.textContent = canvasFolded ? "▸" : "▾";
+    canvasFoldButton.title = canvasFolded ? "展开画布尺寸" : "收起画布尺寸";
+    canvasFoldButton.setAttribute("aria-expanded", String(!canvasFolded));
+    try {
+      window.localStorage.setItem(CANVAS_FOLD_KEY, canvasFolded ? "1" : "0");
+    } catch {
+      // Private mode or a sandboxed iframe: folding still works, it just is not
+      // remembered across sessions.
+    }
+  }
+
+  function snapCanvas(value) {
+    const rounded = Math.round(Number(value) / SIZE_MULTIPLE) * SIZE_MULTIPLE;
+    if (!Number.isFinite(rounded)) return DEFAULT_SIZE;
+    return Math.min(Math.max(rounded, MIN_SIZE), MAX_CANVAS);
+  }
+
+  // Round up instead of to-nearest. A pasted draft states the canvas its boxes
+  // were drawn on, so snapping down (1300 -> 1296) would leave boxes hanging
+  // past the new right/bottom edge and fitBox would silently clip them. Growing
+  // never drops geometry, and it matches coverBox(), which also expands outward
+  // rather than trimming.
+  function snapUpCanvas(value) {
+    const rounded = Math.ceil(Number(value) / SIZE_MULTIPLE) * SIZE_MULTIPLE;
+    if (!Number.isFinite(rounded)) return DEFAULT_SIZE;
+    return Math.min(Math.max(rounded, MIN_SIZE), MAX_CANVAS);
+  }
+
+  function ratioOf(label) {
+    return RATIOS.find((entry) => entry.label === label) ?? RATIOS[0];
+  }
+
+  // Closest ratio to an arbitrary canvas, always defined. Used when the user
+  // flips to preset mode, so the canvas does not jump to whatever ratio was
+  // remembered from a previous workflow.
+  function nearestRatio(longEdge, shortEdge) {
+    let best = RATIOS[0].label;
+    let bestError = Infinity;
+    for (const entry of RATIOS) {
+      const expected = (longEdge * Math.min(entry.w, entry.h)) / Math.max(entry.w, entry.h);
+      const error = Math.abs(expected - shortEdge);
+      if (error < bestError) {
+        bestError = error;
+        best = entry.label;
+      }
+    }
+    return best;
+  }
+
+  // The custom mode stores no ratio, so spell out what the current size works out
+  // to. It is the only cue telling whether a pasted draft landed on the ratio it
+  // came from: preset hits get their label back, anything else its own ratio.
+  function ratioHint() {
+    const longEdge = Math.max(state.width, state.height);
+    const shortEdge = Math.min(state.width, state.height);
+    const portrait = state.height > state.width;
+    const label = nearestRatio(longEdge, shortEdge);
+    const entry = RATIOS.find((item) => item.label === label);
+    const expected = (longEdge * Math.min(entry.w, entry.h)) / Math.max(entry.w, entry.h);
+    if (Math.abs(expected - shortEdge) <= RATIO_SLACK) {
+      return `比例 ${portrait ? `${entry.h}:${entry.w}` : `${entry.w}:${entry.h}`}`;
+    }
+    return `比例 1 : ${(longEdge / shortEdge).toFixed(2)}（不在预设表中）`;
+  }
+
+  // Long edge drives the size; the short edge follows and lands on the 16 grid.
+  function presetCanvasSize() {
+    const ratio = ratioOf(canvasUI.ratio);
+    const longEdge = snapCanvas(canvasUI.longEdge);
+    const shortEdge = snapCanvas((longEdge * Math.min(ratio.w, ratio.h)) / Math.max(ratio.w, ratio.h));
+    return canvasUI.orient === "landscape" ? [longEdge, shortEdge] : [shortEdge, longEdge];
+  }
+
+  function areaLabel(width, height) {
+    return `${((width * height) / AREA_UNIT).toFixed(AREA_DIGITS)} M`;
+  }
+
+  // Match the live canvas back onto a preset when it happens to sit on one, and
+  // fall back to custom otherwise. Only called on load and on edits made through
+  // the native width/height widgets, never while the panel itself is editing —
+  // otherwise typing a size would immediately flip the mode under the cursor.
+  function inferCanvasUI() {
+    const width = state.width;
+    const height = state.height;
+    const longEdge = Math.max(width, height);
+    const shortEdge = Math.min(width, height);
+    const match = RATIOS.find((entry) => {
+      const expected = (longEdge * Math.min(entry.w, entry.h)) / Math.max(entry.w, entry.h);
+      return Math.abs(expected - shortEdge) <= RATIO_SLACK;
+    });
+    canvasUI.mode = match ? "preset" : "custom";
+    if (!match) return;
+    canvasUI.ratio = match.label;
+    canvasUI.longEdge = longEdge;
+    canvasUI.edgeCustom = !LONG_EDGES.includes(longEdge);
+    canvasUI.orient = width >= height ? "landscape" : "portrait";
+  }
+
+  function refreshCanvasReadout() {
+    if (!canvasReadout) return;
+    // A workflow saved elsewhere can carry a size the backend rejects. Snapping
+    // on load would silently rewrite saved geometry, so only flag it here.
+    const odd = state.width % SIZE_MULTIPLE !== 0 || state.height % SIZE_MULTIPLE !== 0;
+    canvasReadout.textContent = `${state.width} × ${state.height} · ${areaLabel(state.width, state.height)}`
+      + (odd ? " · 非 16 倍数" : "");
+    canvasReadout.classList.toggle("is-warn", odd);
+    if (canvasNote) canvasNote.textContent = ratioHint();
+  }
+
+  // Single entry point for resizing the canvas: snaps to the 16 grid the backend
+  // demands, mirrors the value onto the native widgets, pulls every box back
+  // inside, then repaints. Never calls render(), so typing in the panel keeps
+  // its focus and the list keeps its scroll position.
+  function applyCanvasSize(width, height) {
+    const nextWidth = snapCanvas(width);
+    const nextHeight = snapCanvas(height);
+    const changed = nextWidth !== state.width || nextHeight !== state.height;
+    state.width = nextWidth;
+    state.height = nextHeight;
+    writeSize("width", nextWidth);
+    writeSize("height", nextHeight);
+    if (changed) {
+      let fitted = 0;
+      state.items.forEach((item, index) => {
+        const next = fitBox(item.bbox);
+        if (next.some((value, position) => value !== item.bbox[position])) fitted += 1;
+        item.bbox = next;
+        writeBboxInputs(index, false);
+      });
+      sync();
+      draw();
+      if (fitted) flash(`${fitted} 个框已收回新画布内`);
+    }
+    refreshCanvasReadout();
+    return changed;
+  }
+
+  // Number field for the panel. `onCommit` returns the value actually applied,
+  // so a snapped input can rewrite itself once the user leaves the field.
+  function canvasNumber(value, onCommit, attrs = {}) {
+    let input = null;
+    const commit = (rewrite) => {
+      const number = Number(input.value);
+      if (!Number.isFinite(number) || number < MIN_SIZE) {
+        if (rewrite) input.value = String(value);
+        return;
+      }
+      const applied = onCommit(number);
+      if (rewrite) input.value = String(Number.isFinite(applied) ? applied : value);
+    };
+    input = h("input", {
+      class: "mlp-num mlp-num-fixed",
+      type: "number",
+      min: String(MIN_SIZE),
+      max: String(MAX_CANVAS),
+      step: String(SIZE_MULTIPLE),
+      autocomplete: "off",
+      onkeydown: (event) => event.stopPropagation(),
+      oninput: () => commit(false),
+      onchange: () => commit(true),
+      ...attrs,
+    });
+    input.value = String(value);
+    return input;
+  }
+
+  // Long edge is edited by two controls that stay in sync: a real <select> so the
+  // presets are one click away (a <input list=datalist> only offers completion
+  // once something is typed, which is what made picking them so awkward), plus a
+  // number field for arbitrary values.
+  function longEdgePicker() {
+    const options = LONG_EDGES.map((edge) => h("option", { value: String(edge), text: String(edge) }));
+    options.push(h("option", { value: "custom", text: "自定义…" }));
+    const element = h("select", {
+      class: "mlp-select mlp-select-long",
+      title: "常用长边，点开直接选",
+      onchange: (event) => {
+        const raw = event.target.value;
+        if (raw === "custom") {
+          // Nothing changes yet: the point is to hand the cursor to the number
+          // field so an arbitrary long edge can be typed in.
+          canvasUI.edgeCustom = true;
+          paintCanvasBody();
+          longEdgeInput?.focus();
+          longEdgeInput?.select();
+          return;
+        }
+        canvasUI.edgeCustom = false;
+        canvasUI.longEdge = snapCanvas(Number(raw));
+        const [width, height] = presetCanvasSize();
+        applyCanvasSize(width, height);
+        paintCanvasBody();
+      },
+    }, options);
+    element.value = canvasUI.edgeCustom ? "custom" : String(canvasUI.longEdge);
+    longEdgeSelect = element;
+    return element;
+  }
+
+  // Typing in the number field can land on a preset (2048) or off the list
+  // (1300); mirror that onto the select without rebuilding the row, which would
+  // pull the focus out of the field mid-edit.
+  function syncLongEdgeSelect() {
+    if (!longEdgeSelect?.isConnected) return;
+    const onList = LONG_EDGES.includes(canvasUI.longEdge);
+    longEdgeSelect.value = onList && !canvasUI.edgeCustom ? String(canvasUI.longEdge) : "custom";
+  }
+
+  function canvasCard() {
+    canvasReadout = h("span", { class: "mlp-area" });
+    canvasBody = h("div");
+    canvasFoldButton = h("button", {
+      class: "mlp-fold",
+      type: "button",
+      text: "▾",
+      onclick: () => {
+        canvasFolded = !canvasFolded;
+        applyCanvasFold();
+      },
+    });
+    const element = h("div", { class: "mlp-card" }, [
+      h("div", { class: "mlp-head" }, [
+        h("span", { class: "mlp-title", text: "画布尺寸" }),
+        h("span", { class: "mlp-spacer" }),
+        canvasReadout,
+        canvasFoldButton,
+      ]),
+      canvasBody,
+    ]);
+    applyCanvasFold();
+
+    paintCanvasBody = () => {
+      let edgeInput = null;
+      longEdgeSelect = null;
+      longEdgeInput = null;
+      canvasNote = null;
+      const rows = [
+        h("div", { class: "mlp-row" }, [
+          segment(MODE_OPTIONS, canvasUI.mode, (value) => {
+            if (canvasUI.mode === value) return;
+            canvasUI.mode = value;
+            if (value === "preset") {
+              // Seed the preset from what is on the canvas right now, then apply:
+              // for a canvas that already sits on a ratio this is a no-op, and for
+              // an odd one it picks the nearest ratio instead of the last used.
+              const longEdge = Math.max(state.width, state.height);
+              canvasUI.ratio = nearestRatio(longEdge, Math.min(state.width, state.height));
+              canvasUI.longEdge = longEdge;
+              canvasUI.edgeCustom = !LONG_EDGES.includes(longEdge);
+              canvasUI.orient = state.width >= state.height ? "landscape" : "portrait";
+              const [width, height] = presetCanvasSize();
+              applyCanvasSize(width, height);
+            } else {
+              canvasUI.longEdge = Math.max(state.width, state.height);
+              canvasUI.edgeCustom = !LONG_EDGES.includes(canvasUI.longEdge);
+            }
+            paintCanvasBody();
+          }),
+        ]),
+      ];
+
+      if (canvasUI.mode === "custom") {
+        rows.push(h("div", { class: "mlp-row mlp-canvas-row" }, [
+          h("span", { class: "mlp-label-inline", text: "宽" }),
+          canvasNumber(state.width, (value) => {
+            applyCanvasSize(value, state.height);
+            return state.width;
+          }, { title: CANVAS_STEP_HINT }),
+          h("span", { class: "mlp-label-inline", text: "高" }),
+          canvasNumber(state.height, (value) => {
+            applyCanvasSize(state.width, value);
+            return state.height;
+          }, { title: CANVAS_STEP_HINT }),
+        ]));
+        canvasNote = h("span", { class: "mlp-note-text", text: ratioHint() });
+        rows.push(h("div", { class: "mlp-row mlp-canvas-note" }, [canvasNote]));
+      } else {
+        rows.push(h("div", { class: "mlp-row mlp-canvas-row" }, [
+          h("span", { class: "mlp-label-inline", text: "比例" }),
+          select(RATIOS.map((entry) => entry.label), canvasUI.ratio, (value) => {
+            canvasUI.ratio = value;
+            const [width, height] = presetCanvasSize();
+            applyCanvasSize(width, height);
+            paintCanvasBody();
+          }),
+        ]));
+        rows.push(h("div", { class: "mlp-row mlp-canvas-row" }, [
+          h("span", { class: "mlp-label-inline", text: "长边" }),
+          longEdgePicker(),
+          edgeInput = canvasNumber(canvasUI.longEdge, (value) => {
+            canvasUI.longEdge = snapCanvas(value);
+            canvasUI.edgeCustom = !LONG_EDGES.includes(canvasUI.longEdge);
+            const [width, height] = presetCanvasSize();
+            applyCanvasSize(width, height);
+            syncLongEdgeSelect();
+            return canvasUI.longEdge;
+          }, { class: "mlp-num mlp-num-fixed mlp-num-long",
+               title: `也可以直接输入任意长边。${CANVAS_STEP_HINT}` }),
+          h("span", { class: "mlp-unit-text", text: "px" }),
+        ]));
+        longEdgeInput = edgeInput;
+        rows.push(h("div", { class: "mlp-row" }, [
+          segment(ORIENT_OPTIONS, canvasUI.orient, (value) => {
+            if (canvasUI.orient === value) return;
+            canvasUI.orient = value;
+            const [width, height] = presetCanvasSize();
+            applyCanvasSize(width, height);
+            paintCanvasBody();
+          }),
+        ]));
+      }
+
+      canvasBody.replaceChildren(...rows);
+      refreshCanvasReadout();
+    };
+
+    paintCanvasBody();
+    return element;
   }
 
   function fitBox(box) {
@@ -1216,6 +1872,15 @@ function createEditor(node) {
     if (widget && Number(widget.value) !== value) widget.value = value;
   }
 
+  // Imported boxes can carry fractions (external tooling, proportional math).
+  // layout.py rounds those outward — floor the start, ceil the end — so a
+  // fractional box still covers the content it describes. Rounding to nearest
+  // here would clip up to 1px off the box, so match the backend on the way in.
+  // Only the import path uses this; dragging still rounds to nearest below.
+  function coverBox(box) {
+    return [Math.floor(box[0]), Math.floor(box[1]), Math.ceil(box[2]), Math.ceil(box[3])];
+  }
+
   function normalizeItem(entry) {
     if (!entry || typeof entry !== "object") return null;
     const box = Array.isArray(entry.bbox) ? entry.bbox.map(Number) : null;
@@ -1225,7 +1890,7 @@ function createEditor(node) {
       caption: typeof entry.caption === "string" ? entry.caption : "",
       text: typeof entry.text === "string" ? entry.text : "",
       color: typeof entry.color === "string" && HEX_COLOR.test(entry.color) ? entry.color.toLowerCase() : null,
-      bbox: fitBox(box),
+      bbox: fitBox(coverBox(box)),
     };
     for (const key of PASS_THROUGH_FIELDS) {
       const values = stringArray(entry[key]);
@@ -1256,6 +1921,7 @@ function createEditor(node) {
     resetCycle();
     writeSize("width", state.width);
     writeSize("height", state.height);
+    inferCanvasUI();
   }
 
   function buildDraft() {
@@ -1311,8 +1977,9 @@ function createEditor(node) {
     const draftJson = JSON.stringify(draft);
     const widget = widgetByName(LAYOUT_WIDGET);
     if (widget) widget.value = draftJson;
-    previewBody.value = compiledPrompt(draft);
+    renderPreview(draft);
     mirrorSource(draftJson);
+    refreshWarnings();
   }
 
   function load() {
@@ -1330,28 +1997,76 @@ function createEditor(node) {
     applySource();
   }
 
-  function loadDraftText(raw, label) {
+  // `silent` suppresses the toast for callers that report the failure themselves
+  // in place (the source dialog writes an inline note, so a toast would double up).
+  function loadDraftText(raw, label, silent = false) {
     const parsed = parseDraftText(raw);
     if (!parsed) {
-      if (label) window.alert(`${label}：没有找到草稿 JSON。`);
+      const message = "没有找到可用的草稿 JSON（需要含 summary / items 的对象）。";
+      if (label) window.alert(`${label}：${message}`);
+      else if (!silent && raw !== lastWarnText) flash("没找到可用的草稿 JSON · 画布保持不变");
+      lastWarnText = raw;
       return false;
     }
+    const compiled = isCompiledDraft(parsed);
+    const carriedSize = Number(parsed.width) > 0 && Number(parsed.height) > 0;
     let draft = parsed;
     if (isSceneSchema(parsed)) draft = draftFromSceneSchema(parsed, state.width, state.height);
-    else if (isCompiledDraft(parsed)) draft = draftFromCompiled(parsed, state.width, state.height);
-    if (draft !== parsed) {
+    else if (compiled) draft = draftFromCompiled(parsed, state.width, state.height);
+    const converted = draft !== parsed;
+
+    // layout.py only accepts canvas sizes that are a multiple of 16. The size
+    // panel snaps, but a pasted draft used to land in `state` untouched, so the
+    // editor would happily show a canvas the backend rejects at execution time.
+    // Snap here (import only — never in applyDraft, which also runs when loading
+    // an existing workflow and must not rewrite its saved geometry). Round up,
+    // not to nearest: the draft's boxes were drawn against the size it declares,
+    // so a smaller canvas would clip them. When the size came from a compiled
+    // prompt it is just the current canvas, already snapped, so nothing to do.
+    let snapNote = "";
+    const declaredWidth = Number(draft.width);
+    const declaredHeight = Number(draft.height);
+    if (declaredWidth > 0 && declaredHeight > 0 && !(compiled && !carriedSize)) {
+      const snappedWidth = snapUpCanvas(declaredWidth);
+      const snappedHeight = snapUpCanvas(declaredHeight);
+      if (snappedWidth !== declaredWidth || snappedHeight !== declaredHeight) {
+        snapNote = `画布 ${declaredWidth}×${declaredHeight} 不是 16 的倍数，已吸附为 ${snappedWidth}×${snappedHeight}（后端校验要求）`;
+        draft = { ...draft, width: snappedWidth, height: snappedHeight };
+      }
+    }
+
+    let fittedNote = "";
+    if (converted) {
       const fitted = fitDraftToCanvas(draft);
       if (fitted) {
         draft = fitted;
-        const notice = `框超出 ${draft.width}×${draft.height} 画布，已等比缩放到画布内。`;
-        if (label) window.alert(`${label}：${notice}`);
-        else console.warn(`[moss-layoutPrompt] ${notice}`);
+        // A compiled prompt carries no canvas size, so boxes running past the
+        // canvas are a strong hint that the original canvas was larger — say so
+        // instead of silently rescaling them against the wrong frame.
+        fittedNote = compiled && !carriedSize
+          ? `框超出当前 ${draft.width}×${draft.height}，已等比缩放 · 原画布未知，可先设好尺寸再粘贴`
+          : `框超出 ${draft.width}×${draft.height} 画布，已等比缩放到画布内`;
+        if (label) window.alert(`${label}：${fittedNote}`);
       }
     }
     applyDraft(draft);
+    // An imported draft states a size outright — it was not picked off the
+    // preset row — so show it as custom instead of claiming it came from a ratio.
+    canvasUI.mode = "custom";
+    canvasUI.longEdge = Math.max(state.width, state.height);
+    canvasUI.edgeCustom = !LONG_EDGES.includes(canvasUI.longEdge);
+    paintCanvasBody();
     render();
     sync();
     draw();
+    const boxes = `${draft.items.length} 个分区`;
+    const notes = [snapNote, fittedNote].filter(Boolean);
+    if (notes.length) flash(`${notes.join(" · ")} · ${boxes}`);
+    else if (compiled && !carriedSize) {
+      flash(`已载入编译结果（它不含画布尺寸）· ${boxes}按当前 ${draft.width}×${draft.height} 换算`);
+    } else {
+      flash(`已载入 ${boxes} · 画布 ${draft.width}×${draft.height}`);
+    }
     return true;
   }
 
@@ -1624,8 +2339,10 @@ function createEditor(node) {
       ? state.items.map(itemCard)
       : [h("div", { class: "mlp-empty", text: "在左侧画布空白处拖动即可新建框" })];
     list.replaceChildren(
+      canvasCard(),
       summaryCard(),
       toolbar(),
+      warnBar,
       ...rows,
       h("div", {
         class: "mlp-hint",
@@ -1633,7 +2350,8 @@ function createEditor(node) {
       }),
     );
     list.querySelectorAll(".mlp-textarea").forEach(autosize);
-    previewBody.value = compiledPrompt();
+    renderPreview();
+    refreshWarnings();
   }
 
   function addItem(box) {
@@ -2096,13 +2814,18 @@ function createEditor(node) {
   function endDrag() {
     if (!drag) return;
     const created = drag.mode === "create" && drag.index >= 0;
-    const changed = created || drag.mode === "move" || drag.mode === "resize";
+    // A plain click also enters "move" mode, but nothing changed. Syncing on it is
+    // not just wasteful: the sync mirrors the draft into `source`, that DOM churn
+    // makes the frontend re-run onConfigure, and `load()` → `applyDraft()` calls
+    // resetCycle() — which wipes the overlap rotation state, so a second click on
+    // the same stack could never advance.
+    const moved = drag.moved === true;
     drag = null;
     if (created) {
       render();
       list.scrollTop = list.scrollHeight;
     }
-    if (changed) sync();
+    if (created || moved) sync();
     draw();
   }
 
@@ -2127,6 +2850,9 @@ function createEditor(node) {
         const value = Math.round(Number(widget.value));
         if (Number.isFinite(value) && value >= MIN_SIZE) {
           state[name] = value;
+          // The native widget may have landed on a preset combination, so let the
+          // size panel follow instead of showing a stale ratio.
+          inferCanvasUI();
           for (const item of state.items) item.bbox = fitBox(item.bbox);
           render();
           sync();

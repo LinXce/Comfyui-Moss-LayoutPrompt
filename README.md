@@ -77,6 +77,35 @@ canvas size.
 
 ## Editor
 
+- `画布尺寸` at the top of the right panel sets the canvas two ways. In `自定义`
+  mode you type `宽` / `高` directly. In `预设` mode you pick a ratio (`1:1`,
+  `3:2`, `16:9`, `21:9`, …) and a long edge, and `横屏` / `竖屏` decides whether
+  that long edge becomes the width or the height — `16:9` at 2560 in landscape
+  gives 2560×1440. The dropdown left of the long edge lists the common values and
+  applies one on click; the field beside it takes any value, and picking `自定义…`
+  puts the cursor there. Every size is snapped to the multiple of 16 the backend
+  requires, and the card header shows the area in megapixels (`2560 × 1440 ·
+  3.69 M`). The mode is re-derived from the canvas on load, so a reopened
+  workflow shows the ratio it is actually using. `自定义` mode has no ratio
+  control, so it states the ratio of the current size below the fields
+  (`比例 16:9`), or the actual value when it is off the preset table — the quick
+  way to confirm a pasted prompt landed on the ratio it came from. A pasted draft
+  is snapped the same way (rounding up, never down — a smaller canvas would clip
+  boxes sitting on the edge) and the status line states the before/after size. A
+  workflow that was saved with a size that is not a multiple of 16 is left
+  untouched on load — its card header just flags `非 16 倍数` so you can decide.
+  The `▾` in the header folds the whole control block away, keeping only the size
+  and area readout; the folded state lives in the browser, not in the draft, and
+  does not affect the node output.
+- `编译结果预览` at the bottom mirrors the node output exactly. `复制` copies what
+  is on screen; `复制草稿` copies a draft carrying the canvas size and absolute
+  coordinates, which restores the layout completely when pasted back into
+  `source`. The header toggles between `JSON` and `文本`: `JSON` is the canonical
+  form, where a `\(` in the prompt is written `\\(` as JSON demands, and can be
+  pasted back; `文本` folds each backslash back to one for reading or for handing
+  the prompt to another tool. Note that `文本` is **not valid JSON**: it can still
+  be pasted back thanks to the tolerant parser, but a doubled backslash (as in
+  LaTeX `\\`) collapses to one — use `复制草稿` for a lossless round trip.
 - Drag on empty canvas to create a box, drag inside a box to move it, and drag
   the dot at its bottom-right corner to resize it — the dot shows on hover or on
   the selected box. A box can also be typed as `x1, y1, x2, y2`.
@@ -98,7 +127,10 @@ canvas size.
 - The right panel edits the summary prompt and one row per box: `label`
   (`object`, `character`, `text`), `caption` describing how the element looks,
   and for text items the exact `text` to render. `caption`, `text` and the
-  summary prompt are multiline boxes that grow with their content.
+  summary prompt are multiline boxes that grow with their content. `caption` may
+  be empty, `text` may not — the backend requires a nonempty `text` on a `text`
+  item, so emptying one raises a persistent warning above the box list and marks
+  that card, instead of only failing when the queue runs.
 - `meta` tags are chips: type and press Enter or comma to add one, click a chip
   to edit it in place, and click anywhere outside the chip (or press Enter) to
   finish. `Esc` cancels the edit; `×` removes the tag.
@@ -113,8 +145,10 @@ canvas size.
   a compiled `abs_centralized`/`yxyx` prompt or a legacy `scene_type`/`elements`
   scene prompt is converted with the node's `width`/`height`. If the converted
   boxes overflow the canvas they are scaled uniformly around its centre to fit.
-- The bottom of the panel pins a read-only preview of the prompt the node will
-  output, so the compiled result is always visible while you edit.
+  Note that a **compiled prompt carries no canvas size** (the backend emits only
+  `summary`, `items` and the two format fields), so pasting one back never
+  resizes the canvas — it is converted against the current one. Use the
+  `复制草稿` format to carry the size, or set the canvas first and paste after.
 
 ## Draft and compiled prompts
 
@@ -139,13 +173,28 @@ behaves like a plain text prompt.
 
 Validation only covers the shape of the draft: canvas size, box geometry,
 `label` values and field names. Captions are content, so leaving the summary
-prompt or a box caption empty is allowed and the node still runs.
+prompt or a box caption empty is allowed and the node still runs. A `text` item
+is the exception: its `text` is what the model renders, so it must be nonempty —
+the editor warns about it while you edit rather than letting it fail on execute.
 
 A draft can also arrive through the `source` input. Pasting or importing there
 loads it onto the canvas, which stays the source of truth for editing; a
 compiled `abs_centralized`/`yxyx` prompt is decoded back with the node's
 `width`/`height` first. Without the canvas editor, `source` is compiled
 directly, but only when the canvas holds no boxes.
+
+Reading `source` is deliberately tolerant, because a prompt rarely arrives as
+clean JSON. A caption that went through a prompt escapes parentheses as `\(`
+and `\)` to keep them out of emphasis parsing — illegal inside JSON, so the
+parser repairs those backslashes before parsing and the caption still reads
+`\(` afterwards. The same value can also arrive double encoded (a workflow
+stores the widget string as a string) or wrapped in a `{"layout": …}` /
+`{"draft": …}` / `{"source": …}` envelope; both are unwrapped, up to four
+levels. Text surrounding the object — a code fence, a sentence of commentary —
+is skipped by scanning for the object itself. Anything that still does not look
+like a draft (`summary`, `items` or `elements`) is rejected without touching the
+canvas, so pasting an unrelated object never blanks your boxes; you get a
+message instead.
 
 Editing or pasting into `source` always re-applies it — even when the text ends
 up unchanged — so it can replace the canvas at any time. In the other direction,
