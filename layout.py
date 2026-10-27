@@ -79,8 +79,10 @@ def _centered(box, width, height, location):
     x1, y1, x2, y2 = box
     _require(0 <= x1 < x2 <= width and 0 <= y1 < y2 <= height,
              f"{location} must lie inside the {width}x{height} canvas")
-    result = [math.floor(y1) - height // 2, math.floor(x1) - width // 2,
-              math.ceil(y2) - height // 2, math.ceil(x2) - width // 2]
+    result = [math.floor(round(y1, 9)) - height // 2,
+              math.floor(round(x1, 9)) - width // 2,
+              math.ceil(round(y2, 9)) - height // 2,
+              math.ceil(round(x2, 9)) - width // 2]
     _require(result[0] < result[2] and result[1] < result[3], f"{location} is too small")
     return result
 
