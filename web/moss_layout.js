@@ -234,6 +234,8 @@ const CSS = `
   background:#2a1f11;color:#f0b46a;font-size:11px;line-height:1.55}
 .mlp-warn.is-hidden{display:none}
 .mlp-area{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#8fd18f;white-space:nowrap}
+.mlp-fold{border:none;background:transparent;color:#7d8592;cursor:pointer;font:11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;padding:2px 4px;border-radius:4px;line-height:1}
+.mlp-fold:hover{background:#2a323d;color:#e2e5ea}
 .mlp-area.is-warn{color:#f0b46a}
 .mlp-seg{display:inline-flex;border:1px solid #343b47;border-radius:6px;overflow:hidden;flex:0 0 auto}
 .mlp-seg button{border:0;border-radius:0;background:#1b1f26;color:#9aa3b0;padding:4px 10px;
@@ -1452,9 +1454,38 @@ function createEditor(node) {
   let canvasReadout = null;
   let canvasNote = null;
   let canvasBody = null;
+  let canvasFoldButton = null;
   let longEdgeSelect = null;
   let longEdgeInput = null;
   let paintCanvasBody = () => {};
+
+  // Whether the size card is folded is a view preference, not part of the
+  // layout, so it lives in localStorage instead of the draft widget — same
+  // reason canvasUI is memory-only.
+  const CANVAS_FOLD_KEY = "moss-layout.canvas-folded";
+  let canvasFolded = (() => {
+    try {
+      return window.localStorage.getItem(CANVAS_FOLD_KEY) === "1";
+    } catch {
+      return false;
+    }
+  })();
+
+  function applyCanvasFold() {
+    if (!canvasBody || !canvasFoldButton) return;
+    // Hide the body rather than detaching it: paintCanvasBody() rewrites its
+    // children on every render and would write into a detached node.
+    canvasBody.style.display = canvasFolded ? "none" : "";
+    canvasFoldButton.textContent = canvasFolded ? "▸" : "▾";
+    canvasFoldButton.title = canvasFolded ? "展开画布尺寸" : "收起画布尺寸";
+    canvasFoldButton.setAttribute("aria-expanded", String(!canvasFolded));
+    try {
+      window.localStorage.setItem(CANVAS_FOLD_KEY, canvasFolded ? "1" : "0");
+    } catch {
+      // Private mode or a sandboxed iframe: folding still works, it just is not
+      // remembered across sessions.
+    }
+  }
 
   function snapCanvas(value) {
     const rounded = Math.round(Number(value) / SIZE_MULTIPLE) * SIZE_MULTIPLE;
@@ -1656,14 +1687,25 @@ function createEditor(node) {
   function canvasCard() {
     canvasReadout = h("span", { class: "mlp-area" });
     canvasBody = h("div");
+    canvasFoldButton = h("button", {
+      class: "mlp-fold",
+      type: "button",
+      text: "▾",
+      onclick: () => {
+        canvasFolded = !canvasFolded;
+        applyCanvasFold();
+      },
+    });
     const element = h("div", { class: "mlp-card" }, [
       h("div", { class: "mlp-head" }, [
         h("span", { class: "mlp-title", text: "画布尺寸" }),
         h("span", { class: "mlp-spacer" }),
         canvasReadout,
+        canvasFoldButton,
       ]),
       canvasBody,
     ]);
+    applyCanvasFold();
 
     paintCanvasBody = () => {
       let edgeInput = null;
