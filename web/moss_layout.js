@@ -1462,6 +1462,17 @@ function createEditor(node) {
     return Math.min(Math.max(rounded, MIN_SIZE), MAX_CANVAS);
   }
 
+  // Round up instead of to-nearest. A pasted draft states the canvas its boxes
+  // were drawn on, so snapping down (1300 -> 1296) would leave boxes hanging
+  // past the new right/bottom edge and fitBox would silently clip them. Growing
+  // never drops geometry, and it matches coverBox(), which also expands outward
+  // rather than trimming.
+  function snapUpCanvas(value) {
+    const rounded = Math.ceil(Number(value) / SIZE_MULTIPLE) * SIZE_MULTIPLE;
+    if (!Number.isFinite(rounded)) return DEFAULT_SIZE;
+    return Math.min(Math.max(rounded, MIN_SIZE), MAX_CANVAS);
+  }
+
   function ratioOf(label) {
     return RATIOS.find((entry) => entry.label === label) ?? RATIOS[0];
   }
@@ -1966,15 +1977,16 @@ function createEditor(node) {
     // panel snaps, but a pasted draft used to land in `state` untouched, so the
     // editor would happily show a canvas the backend rejects at execution time.
     // Snap here (import only — never in applyDraft, which also runs when loading
-    // an existing workflow and must not rewrite its saved geometry). When the
-    // size came from a compiled prompt it is just the current canvas, already
-    // snapped, so there is nothing to do.
+    // an existing workflow and must not rewrite its saved geometry). Round up,
+    // not to nearest: the draft's boxes were drawn against the size it declares,
+    // so a smaller canvas would clip them. When the size came from a compiled
+    // prompt it is just the current canvas, already snapped, so nothing to do.
     let snapNote = "";
     const declaredWidth = Number(draft.width);
     const declaredHeight = Number(draft.height);
     if (declaredWidth > 0 && declaredHeight > 0 && !(compiled && !carriedSize)) {
-      const snappedWidth = snapCanvas(declaredWidth);
-      const snappedHeight = snapCanvas(declaredHeight);
+      const snappedWidth = snapUpCanvas(declaredWidth);
+      const snappedHeight = snapUpCanvas(declaredHeight);
       if (snappedWidth !== declaredWidth || snappedHeight !== declaredHeight) {
         snapNote = `画布 ${declaredWidth}×${declaredHeight} 不是 16 的倍数，已吸附为 ${snappedWidth}×${snappedHeight}（后端校验要求）`;
         draft = { ...draft, width: snappedWidth, height: snappedHeight };
