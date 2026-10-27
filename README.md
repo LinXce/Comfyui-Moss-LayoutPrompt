@@ -183,6 +183,19 @@ compiled `abs_centralized`/`yxyx` prompt is decoded back with the node's
 `width`/`height` first. Without the canvas editor, `source` is compiled
 directly, but only when the canvas holds no boxes.
 
+Reading `source` is deliberately tolerant, because a prompt rarely arrives as
+clean JSON. A caption that went through a prompt escapes parentheses as `\(`
+and `\)` to keep them out of emphasis parsing — illegal inside JSON, so the
+parser repairs those backslashes before parsing and the caption still reads
+`\(` afterwards. The same value can also arrive double encoded (a workflow
+stores the widget string as a string) or wrapped in a `{"layout": …}` /
+`{"draft": …}` / `{"source": …}` envelope; both are unwrapped, up to four
+levels. Text surrounding the object — a code fence, a sentence of commentary —
+is skipped by scanning for the object itself. Anything that still does not look
+like a draft (`summary`, `items` or `elements`) is rejected without touching the
+canvas, so pasting an unrelated object never blanks your boxes; you get a
+message instead.
+
 Editing or pasting into `source` always re-applies it — even when the text ends
 up unchanged — so it can replace the canvas at any time. In the other direction,
 the editor mirrors every canvas change back into `source` as the current draft;
